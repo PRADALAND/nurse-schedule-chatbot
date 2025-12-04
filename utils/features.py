@@ -321,3 +321,8 @@ def find_peak_risk_info(df: pd.DataFrame, nurse_id: str):
         "shift_type": top["shift_type"]
     }
 
+def date_in_range(date, start, end) -> bool:
+    if start is None or end is None:
+        return False
+    return start <= date <= end
+
