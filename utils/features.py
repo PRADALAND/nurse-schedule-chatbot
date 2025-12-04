@@ -11,6 +11,9 @@ DAY_CODES = {"D", "DAY", "DS", "9D", "LEADER"}
 IGNORED_CODES = {"A"}  # UM 등 분석 제외
 
 
+# -----------------------------
+# SHIFT NORMALIZATION
+# -----------------------------
 def normalize_shift_code(code: str) -> str:
     if pd.isna(code):
         return ""
@@ -21,17 +24,21 @@ def normalize_shift_code(code: str) -> str:
 
 
 def classify_shift(code: str) -> str:
-    if code in OFF_CODES:
+    s = str(code).upper()
+    if s in OFF_CODES:
         return "OFF"
-    if code in NIGHT_CODES:
+    if s in NIGHT_CODES:
         return "NIGHT"
-    if code in EVENING_CODES:
+    if s in EVENING_CODES:
         return "EVENING"
-    if code in DAY_CODES:
+    if s in DAY_CODES:
         return "DAY"
     return "OTHER"
 
 
+# -----------------------------
+# LOAD SCHEDULE
+# -----------------------------
 def load_schedule_file(uploaded_file) -> pd.DataFrame:
     fname = uploaded_file.name.lower()
     if fname.endswith(".csv"):
@@ -44,8 +51,11 @@ def load_schedule_file(uploaded_file) -> pd.DataFrame:
         raise ValueError(f"필수 컬럼이 없습니다: {missing}")
 
     df = df.copy()
-    df["date"] = pd.to_datetime(df["date"]).dt.date
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
     df["shift_code"] = df["shift_code"].apply(normalize_shift_code)
+
+    # UM 등 제거
     df = df[~df["shift_code"].isin(IGNORED_CODES)]
 
     if "is_novice" not in df.columns:
@@ -54,6 +64,9 @@ def load_schedule_file(uploaded_file) -> pd.DataFrame:
     return df
 
 
+# -----------------------------
+# CONSECUTIVE DAYS & NIGHT SHIFTS
+# -----------------------------
 def _compute_consecutive_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["nurse_id", "date"])
     df["prev_date"] = df.groupby("nurse_id")["date"].shift(1)
@@ -70,15 +83,19 @@ def _compute_consecutive_features(df: pd.DataFrame) -> pd.DataFrame:
         last_date = None
 
         for idx, row in group.iterrows():
+            # OFF → reset
             if row["shift_type"] == "OFF":
                 cw = 0
                 cn = 0
+
             else:
+                # 연속 근무일
                 if last_date is not None and (row["date"] - last_date).days == 1:
                     cw += 1
                 else:
                     cw = 1
 
+                # 연속 야간
                 if row["shift_type"] == "NIGHT":
                     if last_date is not None and (row["date"] - last_date).days == 1 and row["prev_shift_type"] == "NIGHT":
                         cn += 1
@@ -96,23 +113,25 @@ def _compute_consecutive_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# -----------------------------
+# STAFFING LEVEL
+# -----------------------------
 def _compute_staffing_features(df: pd.DataFrame) -> pd.DataFrame:
-    # 날짜-근무코드별 실제 인원
     staffed = (
         df[df["shift_type"] != "OFF"]
         .groupby(["date", "shift_code"])["nurse_id"]
         .nunique()
     )
-    df["staffing_count"] = list(
-        df.set_index(["date", "shift_code"]).index.map(
-            lambda key: staffed.get(key, 0)
-        )
+
+    df["staffing_count"] = df.set_index(["date", "shift_code"]).index.map(
+        lambda key: staffed.get(key, 0)
     )
 
-    # 기준 인원 (엑셀 정의 기반)
+    # Baseline rule (엑셀 기반)
     def baseline_for_row(row) -> int:
         code = row["shift_code"]
         stype = row["shift_type"]
+
         if code == "9D":
             return 1
         if stype == "DAY":
@@ -128,27 +147,31 @@ def _compute_staffing_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# -----------------------------
+# QUICK RETURN
+# -----------------------------
 def _compute_quick_return_flags(df: pd.DataFrame) -> pd.DataFrame:
-    # ED_quick_return: E → D/9D (엑셀 기준)
     df["ED_quick_return"] = (
         (df["prev_shift_type"] == "EVENING")
         & (df["shift_type"] == "DAY")
         & (df["shift_code"].isin({"D", "9D"}))
     )
 
-    # N_quick_return: N → D/9D/E (엑셀 기준)
     df["N_quick_return"] = (
         (df["prev_shift_type"] == "NIGHT")
         & (
-            (df["shift_code"].isin({"D", "9D"}))
+            df["shift_code"].isin({"D", "9D"})
             | (df["shift_type"] == "EVENING")
         )
     )
+
     return df
 
 
+# -----------------------------
+# BASE FEATURE WRAPPER
+# -----------------------------
 def add_base_features(df: pd.DataFrame) -> pd.DataFrame:
-    """shift_type, weekend, 연속근무, quick return, staffing 등 기본 피처 계산."""
     df = df.copy()
     df["shift_type"] = df["shift_code"].apply(classify_shift)
     df["weekday"] = df["date"].apply(lambda d: d.weekday())
@@ -157,9 +180,13 @@ def add_base_features(df: pd.DataFrame) -> pd.DataFrame:
     df = _compute_consecutive_features(df)
     df = _compute_staffing_features(df)
     df = _compute_quick_return_flags(df)
+
     return df
 
 
+# -----------------------------
+# DATE RANGE PARSER
+# -----------------------------
 def get_date_range_from_keyword(keyword: str) -> Tuple[dt.date, dt.date]:
     text = keyword.replace(" ", "")
     today = dt.date.today()
@@ -188,5 +215,20 @@ def get_date_range_from_keyword(keyword: str) -> Tuple[dt.date, dt.date]:
     return today, today
 
 
-def filter_schedule(df: p_
+# -----------------------------
+# FINAL: FILTER SCHEDULE  (문제난 부분)
+# -----------------------------
+def filter_schedule(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove rows with missing nurse_id or date.
+    Ensure essential schedule rows only.
+    """
+    df = df.copy()
 
+    df = df[df["nurse_id"].notnull()]
+    df = df[df["date"].notnull()]
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df[df["date"].notnull()]
+
+    return df
