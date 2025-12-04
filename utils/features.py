@@ -269,3 +269,55 @@ def compute_longest_work_streak(df: pd.DataFrame, nurse_id: str):
         best_end = prev_date
 
     return longest, best_start, best_end
+
+def compute_longest_night_streak(df: pd.DataFrame, nurse_id: str):
+    sub = df[df["nurse_id"] == nurse_id].sort_values("date")
+
+    longest = 0
+    current = 0
+    start_date = None
+    best_start = None
+    best_end = None
+
+    prev_date = None
+
+    for _, row in sub.iterrows():
+
+        if row["shift_type"] != "NIGHT":
+            if current > longest:
+                longest = current
+                best_start = start_date
+                best_end = prev_date
+            current = 0
+            start_date = None
+            prev_date = None
+            continue
+
+        if prev_date is None or (row["date"] - prev_date).days != 1:
+            current = 1
+            start_date = row["date"]
+        else:
+            current += 1
+
+        prev_date = row["date"]
+
+    if current > longest:
+        longest = current
+        best_start = start_date
+        best_end = prev_date
+
+    return longest, best_start, best_end
+
+def find_peak_risk_info(df: pd.DataFrame, nurse_id: str):
+    sub = df[df["nurse_id"] == nurse_id].sort_values("date")
+    if sub.empty:
+        return None
+
+    top = sub.loc[sub["overall_risk_score"].idxmax()]
+    return {
+        "date": top["date"],
+        "score": top["overall_risk_score"],
+        "shift_code": top["shift_code"],
+        "shift_type": top["shift_type"]
+    }
+
