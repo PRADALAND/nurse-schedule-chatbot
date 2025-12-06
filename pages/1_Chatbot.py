@@ -1,5 +1,13 @@
 import streamlit as st
 
+PRESET_QUESTIONS = {
+    "이번 달 내 근무 위험도 요약": "이번달 내 근무 위험도 요약해줘",
+    "이번 달 야간/주말 근무 몇 번인지": "이번달 야간, 주말 근무 횟수 알려줘",
+    "이번 달 최장 연속근무/연속야간": "이번달 최대 연속 근무일수와 연속야간 알려줘",
+    "이번 달 quick return 패턴": "이번달 quick return 패턴과 횟수 알려줘",
+}
+
+
 from utils.features import (
     get_date_range_from_keyword,
     filter_schedule,
