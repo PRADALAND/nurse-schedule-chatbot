@@ -1,79 +1,32 @@
+import streamlit as st
 import pandas as pd
+from utils.fairness import compute_fairness_table, compute_fairness_stats
 
+def main():
+    st.title("공정성 대시보드 (Fairness Dashboard)")
 
-REQUIRED_COLS = ["nurse_name", "shift_type", "date"]
+    # --------------------------
+    # DF 체크
+    # --------------------------
+    df = st.session_state.get("schedule_df", None)
 
+    if df is None:
+        st.info("먼저 스케줄 파일을 업로드하세요.")
+        st.stop()
 
-def validate_input(df):
-    """필수 컬럼 존재 여부 검증"""
-    for col in REQUIRED_COLS:
-        if col not in df.columns:
-            raise KeyError(f"필요한 컬럼 '{col}' 이(가) 존재하지 않습니다.")
-    return True
+    # --------------------------
+    # 공정성 테이블 생성
+    # --------------------------
+    fair = compute_fairness_table(df)
 
+    if fair is None or fair.empty:
+        st.warning("공정성 분석 가능한 데이터가 없습니다.")
+        st.stop()
 
-def compute_min_off_interval(sub):
-    """OFF 간격 계산 (없으면 0)"""
-    off_dates = sub[sub["shift_type"] == "OFF"]["date"].sort_values()
-    if len(off_dates) < 2:
-        return 0
-
-    intervals = off_dates.diff().dt.days.dropna()
-    return int(intervals.min()) if not intervals.empty else 0
-
-
-def compute_fairness_table(df):
-    """
-    공정성 분석 핵심 함수.
-    최소 공정성 컬럼들을 생성하여 DataFrame 반환.
-    """
-
-    # 안전장치: 필수 컬럼 검증
-    validate_input(df)
-
-    result_rows = []
-
-    # nurse_name 그룹별 계산
-    for nurse, sub in df.groupby("nurse_name"):
-        sub = sub.copy()
-
-        # 총 OFF / NIGHT 일수
-        total_off = int((sub["shift_type"] == "OFF").sum())
-        total_night = int((sub["shift_type"] == "NIGHT").sum())
-
-        # OFF 간격
-        min_off_interval = compute_min_off_interval(sub)
-
-        # placeholder 값들 — 실제 규칙 기반 계산으로 교체 가능
-        pref_match_ratio = 0.5
-        level_night_ratio = 1.0
-        level_workingdays_ratio = 1.0
-
-        # 임시 fairness score: 반드시 존재하도록 설정
-        fairness_score = (
-            1.0
-            - (total_night * 0.01)
-            - (total_off * 0.005)
-            + (pref_match_ratio * 0.1)
-        )
-
-        row = {
-            "nurse_name": nurse,
-            "fairness_score": float(fairness_score),
-            "pref_match_ratio": float(pref_match_ratio),
-            "total_off_days": total_off,
-            "total_night_days": total_night,
-            "min_off_interval": int(min_off_interval),
-            "level_night_ratio": float(level_night_ratio),
-            "level_workingdays_ratio": float(level_workingdays_ratio),
-        }
-
-        result_rows.append(row)
-
-    fair_df = pd.DataFrame(result_rows)
-
-    # 반드시 컬럼이 생성되었는지 최종 검사
-    REQUIRED_OUTPUTS = [
+    # --------------------------
+    # 필수 컬럼 존재 확인
+    # --------------------------
+    required_cols = [
         "nurse_name",
         "fairness_score",
         "pref_match_ratio",
@@ -84,21 +37,46 @@ def compute_fairness_table(df):
         "level_workingdays_ratio",
     ]
 
-    for col in REQUIRED_OUTPUTS:
-        if col not in fair_df.columns:
-            raise RuntimeError(f"공정성 분석 출력에 '{col}' 생성 실패")
+    missing = [c for c in required_cols if c not in fair.columns]
+    if missing:
+        st.error(f"필요한 컬럼이 존재하지 않습니다: {missing}")
+        st.stop()
 
-    return fair_df
+    # --------------------------
+    # 정렬
+    # --------------------------
+    fair_sorted = fair.sort_values("fairness_score").reset_index(drop=True)
+
+    st.subheader("1) 공정성 낮은 순서 RN 리스트")
+    st.dataframe(fair_sorted[["nurse_name", "fairness_score"]])
+
+    # --------------------------
+    # RN 선택
+    # --------------------------
+    selected = st.selectbox("분석할 간호사 선택", fair_sorted["nurse_name"])
+
+    row = fair_sorted[fair_sorted["nurse_name"] == selected].iloc[0]
+
+    st.subheader("2) 선호 반영율")
+    st.markdown(f"- 선호 근무 반영율: **{row['pref_match_ratio']:.1%}**")
+
+    st.subheader("3) OFF / Night / Interval")
+    st.markdown(
+        f"- 총 OFF 일수: **{int(row['total_off_days'])}일**\n"
+        f"- 총 Night 일수: **{int(row['total_night_days'])}일**\n"
+        f"- 최소 OFF 간격: **{int(row['min_off_interval'])}일**"
+    )
+
+    st.subheader("4) 연차별 공정성")
+    st.markdown(
+        f"- 연차 대비 Night 비율: **{row['level_night_ratio']:.2f}**\n"
+        f"- 연차 대비 근무일수 비율: **{row['level_workingdays_ratio']:.2f}**"
+    )
+
+    st.subheader("5) 전체 통계")
+    stats = compute_fairness_stats(fair)
+    st.write(stats)
 
 
-def compute_fairness_stats(fair_df):
-    """병동 전체 공정성 지표 요약 계산."""
-    if fair_df is None or fair_df.empty:
-        return {}
-
-    return {
-        "fairness_score_std": fair_df["fairness_score"].std(),
-        "avg_pref_match_ratio": fair_df["pref_match_ratio"].mean(),
-        "total_night_std": fair_df["total_night_days"].std(),
-        "total_off_std": fair_df["total_off_days"].std(),
-    }
+if __name__ == "__main__":
+    main()
