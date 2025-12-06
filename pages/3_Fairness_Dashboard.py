@@ -1,56 +1,41 @@
 import streamlit as st
 import pandas as pd
-
-from utils.fairness import compute_fairness_table, compute_fairness_stats, generate_fairness_narrative
-
+from utils.fairness import compute_fairness_table, compute_fairness_stats
 
 def main():
-    st.title("공정성(Fairness) 대시보드")
+    st.title("근무 공정성 대시보드")
 
     df = st.session_state.get("schedule_df")
-    if df is None:
-        st.warning("메인 페이지에서 먼저 스케줄 파일을 업로드해 주세요.")
-        return
+    fair = st.session_state.get("fairness_summary")
 
-    summary = compute_fairness_table(df)
-    if summary.empty:
-        st.info("공정성 분석을 위한 데이터가 없습니다.")
-        return
+    if df is None or fair is None:
+        st.error("먼저 스케줄 파일을 업로드하세요.")
+        st.stop()
 
-    stats = compute_fairness_stats(summary)
+    st.subheader("1) 공정성 낮은 순서 RN 리스트")
+    fair_sorted = fair.sort_values("fairness_score").reset_index(drop=True)
+    st.dataframe(fair_sorted[["nurse_name", "fairness_score"]])
 
-    st.subheader("1. 간호사별 요약 테이블")
-    st.dataframe(summary)
+    selected = st.selectbox("상세 분석할 RN 선택", fair_sorted["nurse_name"])
+    row = fair_sorted[fair_sorted["nurse_name"] == selected].iloc[0]
 
-    st.subheader("2. 야간/주말 근무 분포")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.bar_chart(summary.set_index("nurse_name")["night_shifts"])
-    with col2:
-        st.bar_chart(summary.set_index("nurse_name")["weekend_shifts"])
-
-    st.subheader("3. 공정성 지표 요약")
-    if stats:
-        st.write(
-            {
-                "야간 근무 횟수 표준편차": stats.get("night_std", None),
-                "주말 근무 횟수 표준편차": stats.get("weekend_std", None),
-                "야간 비율 표준편차": stats.get("night_ratio_std", None),
-                "주말 비율 표준편차": stats.get("weekend_ratio_std", None),
-                "평균 overall risk": stats.get("avg_mean_overall_risk", None),
-            }
-        )
-    else:
-        st.write("공정성 통계를 계산할 수 없습니다.")
-
-    st.subheader("4. 간호사별 공정성 해석")
-    nurse_name = st.selectbox(
-        "해석을 보고 싶은 간호사 선택",
-        options=summary["nurse_name"].tolist(),
+    st.subheader("2) 선호 반영율")
+    st.markdown(
+        f"- 선호 근무 반영율: **{row['pref_match_ratio']:.1%}**"
     )
-    narrative = generate_fairness_narrative(summary, nurse_name)
-    st.markdown(narrative)
 
+    st.subheader("3) OFF / Night / Interval 분석")
+    st.markdown(
+        f"- OFF 일수: **{int(row['total_off_days'])}일**\n"
+        f"- Night 일수: **{int(row['total_night_days'])}일**\n"
+        f"- 최소 OFF 간격: **{int(row['min_off_interval'])}일**"
+    )
+
+    st.subheader("4) 연차 대비 공정성")
+    st.markdown(
+        f"- Night 비율(연차보정): **{row['level_night_ratio']:.2f}**\n"
+        f"- 근무일 비율(연차보정): **{row['level_workingdays_ratio']:.2f}**"
+    )
 
 if __name__ == "__main__":
     main()
