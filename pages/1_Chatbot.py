@@ -168,14 +168,26 @@ def main():
 
     init_state()
 
-    nurse_name = st.text_input("조회할 간호사 이름")
-    message = st.text_input("질문 입력")
-
+    nurse_name = st.text_input("조회할 간호사 이름 입력")
     df = st.session_state.get("schedule_df", None)
 
-    if st.button("질문하기"):
-        st.write(handle_message(message, df, nurse_name))
+    st.markdown("#### 1) 자주 쓰는 질문 바로 선택")
 
+    cols = st.columns(2)
+    preset_clicked = None
+    for i, (label, q) in enumerate(PRESET_QUESTIONS.items()):
+        if cols[i % 2].button(label):
+            preset_clicked = q
 
-if __name__ == "__main__":
-    main()
+    st.markdown("#### 2) 자유 질문 입력")
+    message = st.text_input("예: '이번주 내 위험도 요약해줘', '이번달 야간 몇 번이야?'")
+
+    if preset_clicked:
+        answer = handle_message(preset_clicked, df, nurse_name)
+        st.markdown(f"**Q:** {preset_clicked}")
+        st.write(answer)
+    elif st.button("질문하기"):
+        answer = handle_message(message, df, nurse_name)
+        st.markdown(f"**Q:** {message}")
+        st.write(answer)
+
