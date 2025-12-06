@@ -3,7 +3,7 @@ import pandas as pd
 def compute_fairness_table(df):
     """
     공정성 분석을 위해 필요한 최소 컬럼을 생성하는 기본 버전.
-    실제 로직은 이후 네가 보내줄 엑셀 규칙 기반으로 교체하면 됨.
+    실제 로직은 이후 엑셀 규칙 기반으로 교체하면 됨.
     """
 
     result = []
@@ -23,14 +23,12 @@ def compute_fairness_table(df):
         else:
             min_off_interval = 0
 
-        # 선호 반영율 (현재 데이터에 없으므로 임시 0.5)
+        # placeholder 값들
         pref_match_ratio = 0.5
-
-        # 연차 대비 공정성 지표 (실제값 없으니 1.0으로 placeholder)
         level_night_ratio = 1.0
         level_workingdays_ratio = 1.0
 
-        # fairness_score (0~1처럼 가정) — 임시 계산
+        # 임시 fairness 계산
         fairness_score = (
             1.0
             - (total_night * 0.01)
@@ -50,7 +48,6 @@ def compute_fairness_table(df):
         })
 
     return pd.DataFrame(result)
-
 
 
 def compute_fairness_stats(fair_df):
