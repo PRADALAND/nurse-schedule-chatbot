@@ -1,66 +1,71 @@
-import pandas as pd
+import streamlit as st
+from utils.fairness import compute_fairness_table, compute_fairness_stats
 
-def compute_fairness_table(df):
-    """
-    공정성 분석을 위해 필요한 컬럼을 100% 생성하는 안전한 버전.
-    """
+def main():
+    st.title("공정성 대시보드 (Fairness Dashboard)")
 
-    result = []
+    # ------------------------
+    # 1) 데이터 존재 여부 체크
+    # ------------------------
+    df = st.session_state.get("schedule_df", None)
 
-    for nurse, sub in df.groupby("nurse_name"):
-        sub = sub.copy()
+    if df is None or df.empty:
+        st.info("스케줄 데이터가 없습니다. 먼저 Main 페이지에서 스케줄 파일을 업로드하세요.")
+        return  # ★★★ 절대 fairness 계산을 진행하지 않음 ★★★
 
-        # 총 OFF, Night 횟수
-        total_off = (sub["shift_type"] == "OFF").sum()
-        total_night = (sub["shift_type"] == "NIGHT").sum()
+    # ------------------------
+    # 2) 공정성 테이블 계산
+    # ------------------------
+    try:
+        fair = compute_fairness_table(df)
+    except Exception as e:
+        st.error(f"공정성 테이블 생성 중 오류 발생: {e}")
+        return
 
-        # 최소 OFF 간격 계산
-        off_dates = sub[sub["shift_type"] == "OFF"]["date"].sort_values()
-        if len(off_dates) >= 2:
-            intervals = off_dates.diff().dt.days.dropna()
-            min_off_interval = int(intervals.min()) if not intervals.empty else 0
-        else:
-            min_off_interval = 0
+    # ------------------------
+    # 3) 컬럼 검증: 없으면 바로 중단
+    # ------------------------
+    required_cols = [
+        "nurse_name",
+        "fairness_score",
+        "pref_match_ratio",
+        "total_off_days",
+        "total_night_days",
+        "min_off_interval",
+        "level_night_ratio",
+        "level_workingdays_ratio",
+    ]
 
-        # placeholder (향후 엑셀 기반으로 교체)
-        pref_match_ratio = 0.5
-        level_night_ratio = 1.0
-        level_workingdays_ratio = 1.0
+    missing = [c for c in required_cols if c not in fair.columns]
+    if missing:
+        st.error(f"공정성 분석을 위해 필요한 컬럼이 없습니다: {missing}")
+        st.dataframe(fair)  # 무엇이 들어있는지 보여줌 (디버그에 매우 중요)
+        return  # ★★★ 여기서 안전하게 stop → 화면은 뜸 ★★★
 
-        # 임시 fairness 점수 계산 (절대 에러 안 나도록)
-        fairness_score = (
-            1.0
-            - total_night * 0.01
-            - total_off * 0.005
-            + pref_match_ratio * 0.1
-        )
+    # ------------------------
+    # 4) 공정성 테이블 정상 출력
+    # ------------------------
+    fair_sorted = fair.sort_values("fairness_score").reset_index(drop=True)
 
-        result.append({
-            "nurse_name": nurse,
-            "fairness_score": fairness_score,
-            "pref_match_ratio": pref_match_ratio,
-            "total_off_days": total_off,
-            "total_night_days": total_night,
-            "min_off_interval": min_off_interval,
-            "level_night_ratio": level_night_ratio,
-            "level_workingdays_ratio": level_workingdays_ratio,
-        })
+    st.subheader("간호사 공정성 순위 (낮을수록 불공정)")
+    st.dataframe(fair_sorted)
 
-    df_out = pd.DataFrame(result)
-    return df_out
+    # ------------------------
+    # 5) RN 선택해서 상세보기
+    # ------------------------
+    selected = st.selectbox("간호사 선택", fair_sorted["nurse_name"])
+    row = fair_sorted[fair_sorted["nurse_name"] == selected].iloc[0]
 
+    st.subheader("상세 공정성 분석")
+    st.markdown(f"""
+    - 공정성 점수: **{row['fairness_score']:.3f}**
+    - 선호 패턴 반영률: **{row['pref_match_ratio']:.2f}**
+    - OFF 일수: **{row['total_off_days']}**
+    - 야간 근무 일수: **{row['total_night_days']}**
+    - 최소 OFF 간격: **{row['min_off_interval']}일**
+    - 연차 대비 야간 비율: **{row['level_night_ratio']:.2f}**
+    - 연차 대비 근무일 비율: **{row['level_workingdays_ratio']:.2f}**
+    """)
 
-def compute_fairness_stats(fair_df):
-    """병동 전체 공정성 지표 요약."""
-
-    if fair_df is None or fair_df.empty:
-        return {}
-
-    stats = {
-        "fairness_score_std": fair_df["fairness_score"].std(),
-        "avg_pref_match_ratio": fair_df["pref_match_ratio"].mean(),
-        "total_night_std": fair_df["total_night_days"].std(),
-        "total_off_std": fair_df["total_off_days"].std(),
-    }
-
-    return stats
+if __name__ == "__main__":
+    main()
