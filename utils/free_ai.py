@@ -1,51 +1,99 @@
+# utils/free_ai.py
 import os
 import requests
+import json
 
-HF_API_URL = os.getenv("HF_API_URL")  # e.g., https://router.huggingface.co/v1/responses
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")
-HF_MODEL = os.getenv("HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B")
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")  # Streamlit Secrets에 넣기
+HF_API_URL = "https://router.huggingface.co/v1/responses"  # 너가 지정한 URL
+HF_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"      # 너가 지금 사용 중인 모델
 
-SYSTEM_INSTRUCTION = """
-당신은 병동 근무 패턴 분석을 수행하는 AI입니다.
-개인 위험 진단은 하지 않으며, 근무표에서 파생되는 구조적 패턴, 업무량, 휴식 간격 등을 객관적 기준으로 서술합니다.
-"""
 
-def call_llm(user_query: str) -> str:
-    if not HF_API_URL or not HF_API_TOKEN:
-        return "HF API 환경변수가 설정되지 않았습니다."
+def call_llm(prompt: str) -> str:
+    """
+    Hugging Face Responses API v1 에 맞춰 DeepSeek-R1-Distill-Qwen-32B 모델을 호출한다.
+    - prompt: 사용자 문자열
+    - return: 모델 응답 문자열
+    """
+
+    if not HF_API_TOKEN:
+        return "HF_API_TOKEN이 설정되어 있지 않습니다. Streamlit secrets 를 확인하세요."
 
     headers = {
         "Authorization": f"Bearer {HF_API_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
+    # HF Responses API는 'input' 필드를 사용해야 함 (messages 쓰면 400 확정)
+    # 모델에 따라 'max_tokens' 또는 'max_new_tokens'가 통일되지 않아, HF Router는 둘 다 허용.
     payload = {
         "model": HF_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_INSTRUCTION},
-            {"role": "user", "content": user_query}
-        ],
-        "max_tokens": 600,
-        "temperature": 0.6
+        "input": prompt,
+        "max_tokens": 512,
     }
 
     try:
-        response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        data = response.json()
+        resp = requests.post(HF_API_URL, headers=headers, json=payload, timeout=60)
+        resp.raise_for_status()
 
-        # HF router returns:
-        # { "choices": [ { "message": { "content": "..."} } ] }
-        if "choices" in data and len(data["choices"]) > 0:
-            msg = data["choices"][0]["message"]["content"]
-        else:
-            msg = str(data)
-
-        # remove <think> section if exists
-        if "</think>" in msg:
-            msg = msg.split("</think>")[-1].strip()
-
-        return msg.strip()
+    except requests.HTTPError as http_err:
+        # body 내용 일부를 반환해 디버깅 가능
+        body = ""
+        try:
+            body = resp.text[:500]
+        except:
+            pass
+        return f"[HTTP 오류] {resp.status_code}: {body}"
 
     except Exception as e:
-        return f"모델 호출 중 오류가 발생했습니다: {e}"
+        return f"[요청 실패] {str(e)}"
+
+    # ------------------------------
+    # 응답 Parsing (DeepSeek-R1-Distill 호환)
+    # ------------------------------
+    try:
+        data = resp.json()
+
+        # HF Responses API 표준 포맷:
+        # {
+        #   "id": "...",
+        #   "output": {
+        #     "choices": [
+        #       {
+        #         "message": {
+        #            "role": "assistant",
+        #            "content": [
+        #               {"type": "output_text", "text": "..."}
+        #            ]
+        #         }
+        #       }
+        #     ]
+        #   }
+        # }
+
+        if "output" in data and "choices" in data["output"]:
+            choice = data["output"]["choices"][0]
+            message = choice.get("message", {})
+            contents = message.get("content", [])
+
+            collected_texts = []
+            for c in contents:
+                if isinstance(c, dict) and c.get("type") in ("output_text", "text"):
+                    collected_texts.append(c.get("text", ""))
+
+            final_text = "\n".join(collected_texts).strip()
+            if final_text:
+                return final_text
+
+    except Exception:
+        pass
+
+    # ------------------------------
+    # Fallback (OpenAI 호환 응답 구조 대응)
+    # ------------------------------
+    try:
+        if "choices" in data and data["choices"]:
+            return data["choices"][0]["message"]["content"].strip()
+    except:
+        pass
+
+    return "모델 응답을 해석할 수 없습니다. API 응답 구조가 예상과 다릅니다."
