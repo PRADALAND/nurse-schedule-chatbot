@@ -1,4 +1,8 @@
 import streamlit as st
+import pandas as pd
+
+from openai import OpenAI
+
 from utils.features import (
     get_date_range_from_keyword,
     filter_schedule,
@@ -10,6 +14,11 @@ from utils.features import (
 from utils.risk import risk_level
 from utils.fairness import compute_fairness_table, generate_fairness_narrative
 
+from utils.file_store import upload_file
+from utils.analysis_log import log_analysis
+
+# OpenAI 클라이언트 (환경변수 OPENAI_API_KEY 사용)
+client = OpenAI()
 
 PRESET_QUESTIONS = {
     "이번 달 위험도 요약": "이번달 내 근무 위험도 요약해줘",
@@ -18,9 +27,11 @@ PRESET_QUESTIONS = {
     "이번 달 quick return": "이번달 quick return 패턴과 횟수 알려줘",
 }
 
+
 def init_state():
     if "chat_messages" not in st.session_state:
         st.session_state["chat_messages"] = []
+
 
 def summarize_safety(df_slice, nurse_name, start, end):
     if df_slice.empty:
@@ -61,6 +72,7 @@ def summarize_safety(df_slice, nurse_name, start, end):
         lines.append(peak_line)
 
     return "\n".join(lines)
+
 
 def handle_message(msg, df, nurse_name):
     msg = msg.strip()
@@ -107,6 +119,7 @@ def handle_message(msg, df, nurse_name):
         f"- 가장 위험한 날: {worst['date']} ({level})"
     )
 
+
 def main():
     st.title("간호사 스케줄 챗봇")
 
@@ -118,6 +131,9 @@ def main():
 
     nurse_name = st.text_input("조회할 간호사 이름")
 
+    # -----------------------------
+    # 1) 프리셋 질문
+    # -----------------------------
     st.markdown("### 1) 자주 쓰는 질문")
     cols = st.columns(2)
     preset_clicked = None
@@ -125,6 +141,9 @@ def main():
         if cols[i % 2].button(label):
             preset_clicked = q
 
+    # -----------------------------
+    # 2) 자유 질문
+    # -----------------------------
     st.markdown("### 2) 자유 질문 입력")
     message = st.text_input("예: '이번달 야간 몇 번?'")
 
@@ -135,6 +154,119 @@ def main():
     elif st.button("질문하기"):
         st.markdown(f"**Q:** {message}")
         st.write(handle_message(message, df, nurse_name))
+
+    # -----------------------------
+    # 3) AI 파일 분석 (이미지 · CSV)
+    # -----------------------------
+    st.markdown("---")
+    st.markdown("### 3) AI 파일 분석 (이미지 · CSV)")
+
+    ai_file = st.file_uploader(
+        "이미지 또는 CSV 업로드",
+        type=["csv", "png", "jpg", "jpeg"],
+        key="ai_file_uploader",
+    )
+    ai_prompt = st.text_area(
+        "분석 요청",
+        placeholder="예: 이 CSV의 위험 패턴 요약해줘 / 이 이미지를 객관적으로 설명해줘",
+        key="ai_prompt",
+    )
+
+    run_ai = st.button(
+        "AI 분석 실행",
+        disabled=(ai_file is None or not ai_prompt.strip()),
+        key="ai_analyze_button",
+    )
+
+    if run_ai and ai_file is not None and ai_prompt.strip():
+        with st.spinner("AI 분석 중..."):
+            user_id = nurse_name if nurse_name else "anon"
+
+            # 3-1) Supabase Storage 업로드
+            path, url = upload_file(user_id, ai_file)
+
+            fname = ai_file.name.lower()
+            # 3-2) 파일 타입별 AI 분석
+            if fname.endswith(".csv"):
+                # upload_file에서 read()를 한 번 했으므로 다시 읽기 위해 포인터 리셋
+                ai_file.seek(0)
+                df_uploaded = pd.read_csv(ai_file)
+                sample_csv = df_uploaded.head(20).to_csv(index=False)
+
+                completion = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a clinical data analyst specializing in "
+                                "nurse scheduling, workload, fatigue risk, and safety patterns. "
+                                "Explain results in clear Korean for nurses."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"사용자 분석 요청:\n{ai_prompt}\n\n"
+                                f"다음은 CSV 상위 20행 미리보기입니다.\n"
+                                f"{sample_csv}\n\n"
+                                "간호사 입장에서 이해하기 쉬운 방식으로 "
+                                "핵심 위험 패턴과 해석을 정리해 주세요."
+                            ),
+                        },
+                    ],
+                )
+                ai_summary = completion.choices[0].message.content
+                file_type = "csv"
+
+            else:
+                # 이미지 비전 분석
+                completion = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "다음 이미지를 간호사/연구자의 관점에서 "
+                                        "객관적으로 설명해 주세요.\n"
+                                        f"사용자 분석 요청: {ai_prompt}"
+                                    ),
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": url},
+                                },
+                            ],
+                        }
+                    ],
+                )
+                ai_summary = completion.choices[0].message.content
+                file_type = "image"
+
+            # 3-3) 분석 로그 DB 저장
+            log_analysis(
+                user_id=user_id,
+                file_name=ai_file.name,
+                file_type=file_type,
+                file_url=url,
+                user_prompt=ai_prompt,
+                ai_summary=ai_summary,
+            )
+
+        st.success("AI 분석 완료")
+        st.markdown("#### AI 분석 결과")
+        st.write(ai_summary)
+
+        if file_type == "csv":
+            st.markdown("#### CSV 미리보기 (상위 20행)")
+            st.dataframe(df_uploaded.head(20))
+        else:
+            st.markdown("#### 이미지 미리보기")
+            st.image(url)
+
 
 if __name__ == "__main__":
     main()
