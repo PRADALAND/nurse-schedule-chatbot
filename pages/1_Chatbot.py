@@ -7,8 +7,9 @@ import json
 # 환경변수 로드
 # ==============================
 HF_API_TOKEN = os.getenv("HF_API_TOKEN")
-HF_API_URL = os.getenv("HF_API_URL")   # 반드시 router URL
-HF_MODEL = os.getenv("HF_MODEL")
+HF_API_URL = os.getenv("HF_API_URL")   # 반드시 Router 형식 URL
+HF_MODEL = os.getenv("HF_MODEL")       # 현재 TGI endpoint에서는 필요 없음
+
 
 # ==============================
 # LLM 호출 함수
@@ -25,9 +26,11 @@ def call_llm(prompt: str) -> str:
         "Content-Type": "application/json",
     }
 
+    # -------------------------------
+    # ★ Router TGI 공식 입력 포맷
+    # -------------------------------
     payload = {
-        "model": HF_MODEL,
-        "input": prompt,
+        "inputs": prompt,    # 반드시 inputs 사용
         "parameters": {
             "max_new_tokens": 300,
             "temperature": 0.3
@@ -38,31 +41,35 @@ def call_llm(prompt: str) -> str:
         resp = requests.post(HF_API_URL, headers=headers, json=payload)
 
         # -------------------------------
-        # Router 401 에러 처리
+        # HTTP 에러 처리
         # -------------------------------
         if resp.status_code == 401:
             return "❌ Unauthorized: HF API 토큰 권한을 다시 확인하세요."
 
+        if resp.status_code == 404:
+            return f"❌ 404 Not Found: 잘못된 HF_API_URL입니다.\nURL: {HF_API_URL}"
+
+        if resp.status_code != 200:
+            return f"❌ LLM API 오류 (status {resp.status_code}): {resp.text}"
+
         # -------------------------------
-        # JSON 파싱 시도
+        # JSON 파싱
         # -------------------------------
         try:
             data = resp.json()
         except json.JSONDecodeError:
-            return f"❌ 모델 응답이 JSON 형식이 아닙니다 → {resp.text}"
+            return f"❌ JSON 파싱 실패 → {resp.text}"
 
         # -------------------------------
-        # Router 표준 응답 형식 파싱
+        # 정상적인 HF TGI 응답 구조 처리
         # -------------------------------
-        if "generated_text" in data:
-            return data["generated_text"]
-
-        if "outputs" in data and isinstance(data["outputs"], list):
-            if "generated_text" in data["outputs"][0]:
-                return data["outputs"][0]["generated_text"]
+        if isinstance(data, list) and len(data) > 0:
+            item = data[0]
+            if isinstance(item, dict) and "generated_text" in item:
+                return item["generated_text"]
 
         # -------------------------------
-        # 에러 메시지 포함 응답
+        # 예상치 못한 데이터 구조
         # -------------------------------
         return f"❌ 모델 응답 파싱 실패 → {data}"
 
