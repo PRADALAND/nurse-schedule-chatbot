@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-from utils.features import (
-    get_date_range_from_keyword,
-)
+from utils.features import get_date_range_from_keyword
 from utils.analysis_log import log_analysis
 from utils.free_ai import call_llm
 
@@ -12,47 +10,41 @@ st.title("근무 스케줄 챗봇 (AI 기반)")
 df = st.session_state.get("schedule_df", None)
 
 if df is None:
-    st.warning("스케줄 데이터가 없습니다. 메인 페이지에서 파일 업로드가 필요합니다.")
+    st.warning("스케줄 데이터가 없습니다. 메인 페이지에서 파일 업로드하세요.")
     st.stop()
 
 query = st.text_input(
     "질문을 입력하세요:",
-    placeholder="예: '이번달 야간 근무 많이 했어?' 또는 '홍길동 연속근무 요약해줘'"
+    placeholder="예: '홍길동 이번달 야간 몇 번?' 또는 '이번달 위험도 요약해줘'"
 )
 
-if st.button("질문 분석"):
+if st.button("분석 요청"):
     if not query.strip():
         st.warning("질문을 입력하세요.")
         st.stop()
 
-    # 날짜 범위 해석 (기본 기능)
+    # 날짜 범위 해석
     start, end = get_date_range_from_keyword(query)
-
-    # 기간 데이터 자르기
     df_slice = df[(df["date"] >= start) & (df["date"] <= end)]
 
-    # AI에게 자연어 이해 + 분석 요청
+    # 모델 프롬프트
     prompt = f"""
 너는 병동 스케줄 분석 AI이다.
-
 사용자 질문: "{query}"
 
-스케줄 데이터(요약):
-- 행 개수: {len(df_slice)}
-- 날짜 범위: {start}~{end}
+스케줄 요약 정보:
+- 선택된 기간: {start} ~ {end}
+- 전체 근무일수: {(df_slice['shift_type']!='OFF').sum()}
+- 야간 횟수: {(df_slice['shift_type']=='NIGHT').sum()}
+- 총 row 수: {len(df_slice)}
 
-스케줄 통계 예시:
-- 총 근무일수: {(df_slice["shift_type"] != "OFF").sum()}
-- 야간: {(df_slice["shift_type"] == "NIGHT").sum()}
-
-질문을 해석해서 사용자가 원하는 분석 결과를 자연스럽고 정확하게 설명해줘.
+위 질문에 대해 자연스럽고 정확하게 분석결과를 한국어로 설명하라.
 """
 
-    try:
-        response = call_llm(prompt)
-    except Exception as e:
-        st.error(f"AI 호출 실패: {e}")
-        st.stop()
+    # ▶︎ 실제 AI 호출
+    response = call_llm(prompt)
 
     st.write(response)
+
+    # 로그 저장
     log_analysis(query, response)
