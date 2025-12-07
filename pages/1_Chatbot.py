@@ -1,121 +1,73 @@
-# pages/1_Chatbot.py
+import os
+import requests
 
-import streamlit as st
-import pandas as pd
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")
+HF_API_URL = os.getenv("HF_API_URL", "https://router.huggingface.co/v1/responses")
+HF_MODEL = os.getenv("HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B")
 
-# ----------------------------------------------------
-# 1) 세션 상태 초기화: 대화 기록 구조 강제
-# ----------------------------------------------------
-if "chat_history" not in st.session_state or not isinstance(st.session_state.chat_history, list):
-    st.session_state.chat_history = []
+SYSTEM_PROMPT = """
+당신은 한국 병원 간호사의 근무표 패턴을 분석하는 전문 AI입니다.
 
-# ----------------------------------------------------
-# 2) utils 모듈 로드 (Cloud 경로 문제 대비)
-# ----------------------------------------------------
-try:
-    from utils.features import get_date_range_from_keyword
-    from utils.analysis_log import log_analysis
-    from utils.free_ai import call_llm
-except Exception as e:
-    st.error(f"[ERROR] utils 모듈 로드에 실패했습니다: {e}")
-    st.stop()
+[절대 금지]
+1) 개인의 성향, 능력, 평판, 인성, 업무 태도에 대한 평가
+2) 특정 개인의 위험도 점수·위험 추정
+3) 사실이 아닌 추론, 상상, 근거 없는 예측
+4) 한자, 일본어, 중국어 사용
 
-# ----------------------------------------------------
-# 3) 페이지 헤더
-# ----------------------------------------------------
-st.title("근무 스케줄 챗봇 (AI 기반)")
-st.write("간호사 근무표와 근무 스케줄에 대해 질문하면, 데이터 기반으로 해석을 도와드립니다.")
+[허용되는 분석]
+- 근무표 패턴 자체가 만들어내는 피로 누적 가능성
+- 야간근무 과다 여부
+- 휴식 간격의 적정성
+- 스케줄 구조적 위험 요인
+- 데이터 기반 설명
 
-# ----------------------------------------------------
-# 4) 사용자 입력 UI
-# ----------------------------------------------------
-query = st.text_input("질문을 입력하세요:", "")
-
-if st.button("질문 보내기") and query.strip():
-
-    user_text = query.strip()
-
-    # 4-1) 사용자 메시지 세션에 저장
-    st.session_state.chat_history.append({
-        "role": "user",
-        "content": user_text,
-    })
-
-    # 4-2) (선택) 날짜 범위 파싱 – 나중에 스케줄 분석에 활용 가능
-    try:
-        date_info = get_date_range_from_keyword(user_text)
-    except Exception:
-        date_info = None
-
-    # 4-3) LLM 호출 (프롬프트 제어는 free_ai.call_llm 내부에서 수행)
-    answer = call_llm(user_text)
-
-    # 4-4) AI 응답 저장
-    st.session_state.chat_history.append({
-        "role": "assistant",
-        "content": answer,
-    })
-
-    # 4-5) 분석 로그 저장 (예외는 무시)
-    try:
-        log_analysis(user_text, answer)
-    except Exception:
-        pass
-
-# ----------------------------------------------------
-# 5) 채팅 버블 CSS (다크 모드 가독성 최적화)
-# ----------------------------------------------------
-chat_css = """
-<style>
-.user-bubble {
-    background-color: #d0e7ff;  /* 연한 파랑 */
-    color: #0a0a0a;             /* 진한 글자색 */
-    padding: 12px;
-    border-radius: 10px;
-    max-width: 85%;
-    margin-bottom: 10px;
-}
-
-.ai-bubble {
-    background-color: #fff4c2;  /* 연한 크림색 */
-    color: #0a0a0a;             /* 진한 글자색 */
-    padding: 12px;
-    border-radius: 10px;
-    max-width: 85%;
-    margin-bottom: 10px;
-}
-
-.chat-wrapper {
-    margin-top: 20px;
-}
-</style>
+[원칙]
+- 근무표 “패턴 자체”만 분석하고, “개인 평가”는 하지 말 것
+- 데이터가 없으면 “확인할 수 없음”이라고 답변
+- 모든 출력은 반드시 자연스러운 한국어로 작성
 """
-st.markdown(chat_css, unsafe_allow_html=True)
 
-# ----------------------------------------------------
-# 6) 대화 기록 출력
-# ----------------------------------------------------
-st.subheader("대화 기록")
-st.markdown("<div class='chat-wrapper'>", unsafe_allow_html=True)
 
-for turn in st.session_state.chat_history:
+def call_llm(user_input):
+    """
+    HuggingFace Router Responses API 호출.
+    DeepSeek이 안전필터로 output_text를 비우는 경우가 있어
+    fallback을 반드시 적용해야 한다.
+    """
 
-    # 혹시라도 과거 버전에서 tuple이 섞여 있으면 skip
-    if not isinstance(turn, dict):
-        continue
+    headers = {
+        "Authorization": f"Bearer {HF_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
 
-    role = turn.get("role", "")
-    text = turn.get("content", "")
+    payload = {
+        "model": HF_MODEL,
+        "input": [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            },
+            {
+                "role": "user",
+                "content": user_input
+            }
+        ],
+        "max_tokens": 600,
+        "temperature": 0.3
+    }
 
-    if role == "user":
-        st.markdown(
-            f"<div class='user-bubble'><b>사용자:</b><br>{text}</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            f"<div class='ai-bubble'><b>AI:</b><br>{text}</div>",
-            unsafe_allow_html=True,
-        )
+    try:
+        response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=40)
+        data = response.json()
 
-st.markdown("</div>", unsafe_allow_html=True)
+        # HF Router 표준 응답
+        text = data.get("output_text", "")
+
+        # DeepSeek 안전필터 상황 처리
+        if not text or text.strip() == "":
+            return "요청하신 질문은 개인 위험 평가로 분류되어 모델이 답변을 제한했습니다. 근무표 '패턴 자체'에 대한 질문으로 다시 시도해주세요."
+
+        return text
+
+    except Exception as e:
+        return f"모델 요청 중 오류가 발생했습니다: {str(e)}"
