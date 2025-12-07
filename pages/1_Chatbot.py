@@ -1,111 +1,60 @@
 import streamlit as st
-from utils.free_ai import call_llm
+import pandas as pd
+import requests
+import json
 
-# =========================================================
-# 1) 페이지 설정 + 다크 모드 강제 방지
-# =========================================================
-st.set_page_config(page_title="근무 스케줄 챗봇", layout="wide")
+HF_API_URL = "https://router.huggingface.co/v1/responses"
+HF_API_TOKEN = ""   # 토큰 넣기
+MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
 
-# 전체 배경/글자색 강제 (다크모드에서 하얀 글자 문제 해결)
-st.markdown("""
-<style>
-body, .stApp {
-    background-color: white !important;
-    color: black !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# =========================================================
-# 2) 말풍선 CSS (하얀색 문제 해결된 강제버전)
-# =========================================================
-bubble_css = """
-<style>
-
-.user-bubble {
-    background-color: #dce9f7 !important;
-    color: #000000 !important;
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 8px;
-    border: 1px solid #b9d3ea;
-    display: block !important;
-}
-
-.ai-bubble {
-    background-color: #fff5cc !important;
-    color: #000000 !important;
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 8px;
-    border: 1px solid #e6dca8;
-    display: block !important;
-}
-
-</style>
+SYSTEM_PROMPT = """
+당신은 간호사 스케줄 분석기입니다.
+절대 사고 과정(reasoning), 내적독백, 추론 설명, 단계적 사고를 출력하지 마십시오.
+결과만 간결하게 한국어로 말하십시오.
+데이터프레임(df)에 있는 실제 근무 패턴만 기반으로 분석하십시오.
+윤리적 조언, 불필요한 수필형 문장, 조언형 문장은 금지합니다.
 """
-st.markdown(bubble_css, unsafe_allow_html=True)
 
 
-# =========================================================
-# 3) 세션 초기화
-# =========================================================
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+def call_llm(prompt):
+    headers = {
+        "Authorization": f"Bearer {HF_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": MODEL,
+        "input": prompt,
+        "system": SYSTEM_PROMPT,
+        "max_tokens": 300,
+        "temperature": 0.2,
+        "stream": False,
+    }
+
+    resp = requests.post(HF_API_URL, headers=headers, json=payload)
+    data = resp.json()
+
+    # DeepSeek 구조 안전 파싱
+    try:
+        return data["output"][0]["content"][0]["text"]
+    except:
+        return f"(LLM 응답 파싱 실패)\n원본: {data}"
 
 
-# =========================================================
-# 4) 입력 UI
-# =========================================================
 st.title("근무 스케줄 챗봇 (AI 기반)")
 
-query = st.text_input("질문을 입력하세요.", key="ask_input")
+# ------------------------------
+# 반드시 데이터 존재 확인
+# ------------------------------
+df = st.session_state.get("schedule_df")
+if df is None:
+    st.error("스케줄 데이터가 없습니다. 홈 화면에서 CSV를 먼저 업로드하세요.")
+    st.stop()
 
-
-# =========================================================
-# 5) 버튼 클릭 처리
-# =========================================================
-if st.button("질문 보내기"):
-    if query.strip():
-
-        # 사용자 기록
-        st.session_state.chat_history.append({
-            "role": "user",
-            "content": query.strip()
-        })
-
-        # 모델 호출
-        answer = call_llm(query.strip())
-
-        # AI 기록
-        st.session_state.chat_history.append({
-            "role": "ai",
-            "content": answer
-        })
-
-        # 입력창 초기화 + rerun
-        st.session_state.pop("ask_input", None)
-        st.rerun()
-
-
-# =========================================================
-# 6) 대화 표시
-# =========================================================
-st.markdown("---")
-st.subheader("대화 기록")
-
-for turn in st.session_state.chat_history:
-    role = turn["role"]
-    content = turn["content"]
-
-    if role == "user":
-        st.markdown(
-            f"<div class='user-bubble'><b>사용자:</b><br>{content}</div>",
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            f"<div class='ai-bubble'><b>AI:</b><br>{content}</div>",
-            unsafe_allow_html=True
-        )
+# ------------------------------
+# UI
+# ------------------------------
+query = st.text_input("질문을 입력하세요.")
+if st.button("질문 보내기") and query.strip():
+    answer = call_llm(f"근무표 데이터:\n{df.to_string()}\n\n질문: {query}")
+    st.markdown(f"**AI:** {answer}")
