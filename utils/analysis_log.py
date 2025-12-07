@@ -1,9 +1,10 @@
 import datetime
 import streamlit as st
+import pandas as pd
+
 
 def log_analysis(user_query, response):
-    """사용자 질의와 chatbot 응답을 session_state에 기록"""
-
+    """챗봇 분석 로그 기록"""
     if "analysis_logs" not in st.session_state:
         st.session_state["analysis_logs"] = []
 
@@ -12,3 +13,11 @@ def log_analysis(user_query, response):
         "query": user_query,
         "response": response,
     })
+
+
+def fetch_logs():
+    """로그 대시보드에서 로그를 불러오는 함수"""
+    logs = st.session_state.get("analysis_logs", [])
+    if not logs:
+        return pd.DataFrame(columns=["timestamp", "query", "response"])
+    return pd.DataFrame(logs)
