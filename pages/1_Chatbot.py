@@ -1,17 +1,16 @@
 import streamlit as st
 from utils.free_ai import call_llm
 
+# ==============================
+# 스타일 요소
+# ==============================
 bubble_css = """
 <style>
+.chat-container { margin-top: 10px; }
 
-.chat-container {
-    margin-top: 10px;
-}
-
-/* 사용자 메시지 */
 .user-bubble {
-    background-color: #dce9f7;   /* 연한 하늘색 */
-    color: #000000 !important;   /* 글자 검정 */
+    background-color: #dce9f7;
+    color: #000000 !important;
     padding: 12px 14px;
     border-radius: 12px;
     margin-bottom: 10px;
@@ -20,10 +19,9 @@ bubble_css = """
     border: 1px solid #b9d3ea;
 }
 
-/* AI 메시지 */
 .ai-bubble {
-    background-color: #fff5cc;   /* 연한 크림색 */
-    color: #000000 !important;   /* 글자 검정 */
+    background-color: #fff5cc;
+    color: #000000 !important;
     padding: 12px 14px;
     border-radius: 12px;
     margin-bottom: 10px;
@@ -32,14 +30,12 @@ bubble_css = """
     border: 1px solid #e6dca8;
 }
 
-/* 역할 표시 텍스트(사용자:, AI:) */
 .role-label {
     font-weight: 600;
     color: #333333 !important;
     margin-bottom: 4px;
     display: block;
 }
-
 </style>
 """
 st.markdown(bubble_css, unsafe_allow_html=True)
@@ -47,13 +43,14 @@ st.markdown(bubble_css, unsafe_allow_html=True)
 
 st.set_page_config(page_title="근무 스케줄 챗봇", layout="wide")
 
+
 # ==============================
 # 세션 초기화 (오류 방지)
 # ==============================
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# 이전에 tuple 등이 있었으면 강제로 정리
+# 잘못된 값 제거
 cleaned = []
 for item in st.session_state.chat_history:
     if isinstance(item, dict) and "role" in item and "content" in item:
@@ -65,7 +62,12 @@ st.session_state.chat_history = cleaned
 # 입력 UI
 # ==============================
 st.title("근무 스케줄 챗봇 (AI 기반)")
-query = st.text_input("질문을 입력하세요.", key="ask_input")
+
+query = st.text_input(
+    "질문을 입력하세요.",
+    key="ask_input",
+    placeholder="예: 다음 주 근무 일정 알려줘"
+)
 
 if st.button("질문 보내기"):
     if query.strip():
@@ -85,8 +87,9 @@ if st.button("질문 보내기"):
             "content": answer
         })
 
-        # input 값 초기화 (Streamlit 충돌 방지)
-        st.session_state.ask_input = ""
+        # 입력 초기화 방법 (위젯 직접 수정 금지 → rerun 사용)
+        st.session_state.ask_input = ""  # 안전함: rerun 직전에만 변경
+        st.rerun()  # rerun으로 입력창은 빈 문자열로 초기화됨
 
 
 # ==============================
