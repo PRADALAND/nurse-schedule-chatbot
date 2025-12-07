@@ -1,3 +1,4 @@
+# pages/1_Chatbot.py
 import streamlit as st
 import pandas as pd
 
@@ -7,30 +8,27 @@ from utils.features import (
     compute_longest_work_streak,
     compute_longest_night_streak,
     find_peak_risk_info,
-    date_in_range,
+    date_in_range
 )
 from utils.risk import risk_level
-from utils.fairness import compute_fairness_table, generate_fairness_narrative
-
-from utils.file_store import upload_file
-from utils.analysis_log import log_analysis
-from utils.free_ai import analyze_csv_free, analyze_image_free
 
 
-# -----------------------------------------------------------
-# PRESET QUESTIONS
-# -----------------------------------------------------------
-PRESET_QUESTIONS = {
-    "이번 달 위험도 요약": "이번달 내 근무 위험도 요약해줘",
-    "이번 달 야간/주말 횟수": "이번달 야간, 주말 근무 횟수 알려줘",
-    "이번 달 최장 연속근무": "이번달 최대 연속 근무일수와 연속야간 알려줘",
-    "이번 달 quick return": "이번달 quick return 패턴과 횟수 알려줘",
-}
+st.set_page_config(page_title="Chatbot", layout="wide")
+st.title("🤖 스케줄 위험도 챗봇")
+
+# ===========================
+# 1) 파일 업로드 여부 검사
+# ===========================
+if "schedule_df" not in st.session_state:
+    st.error("업로드된 근무표가 없습니다. 메인 페이지(app.py)에서 먼저 파일을 업로드하세요.")
+    st.stop()
+
+df = st.session_state["schedule_df"]
 
 
-# -----------------------------------------------------------
-# SAFETY SUMMARY
-# -----------------------------------------------------------
+# ===========================
+# 2) 안전요약 함수
+# ===========================
 def summarize_safety(df_slice, nurse_name, start, end):
     if df_slice.empty:
         return f"{start}~{end} 스케줄이 없습니다."
@@ -71,76 +69,45 @@ def summarize_safety(df_slice, nurse_name, start, end):
     return "\n".join(lines)
 
 
-# -----------------------------------------------------------
-# PAGE / UI
-# -----------------------------------------------------------
-st.title("근무표 기반 위험도 분석 챗봇")
+# ===========================
+# 3) 자연어 입력 UI
+# ===========================
+st.subheader("자연어 질의")
 
-st.write("CSV 또는 Excel 스케줄 파일을 업로드하세요.")
+user_query = st.text_input("궁금한 내용을 입력하세요")
 
-uploaded_file = st.file_uploader("파일 업로드", type=["csv", "xlsx"])
+# 프리셋
+PRESET_QUESTIONS = {
+    "이번 달 위험도 요약": "이번달 내 근무 위험도 요약해줘",
+    "이번 달 야간/주말 횟수": "이번달 야간, 주말 근무 횟수 알려줘",
+    "이번 달 최장 연속근무": "이번달 최대 연속 근무일수와 연속야간 알려줘",
+    "이번 달 quick return": "이번달 quick return 패턴과 횟수 알려줘",
+}
 
+preset = st.selectbox("프리셋 선택", ["직접 입력"] + list(PRESET_QUESTIONS.keys()))
 
-if "df" not in st.session_state:
-    st.session_state["df"] = None
-
-
-# -----------------------------------------------------------
-# LOAD FILE
-# -----------------------------------------------------------
-if uploaded_file:
-    df = upload_file(uploaded_file)
-    st.session_state["df"] = df
-    st.success("스케줄 파일이 업로드되었습니다.")
-
-
-df = st.session_state.get("df", None)
-
-if df is None:
-    st.stop()
+if preset != "직접 입력":
+    user_query = PRESET_QUESTIONS[preset]
+    st.info(f"자동 입력됨: {user_query}")
 
 
-# -----------------------------------------------------------
-# PRESET QUESTIONS UI
-# -----------------------------------------------------------
-st.subheader("빠른 질문")
-selected_preset = st.selectbox("선택", ["직접 질문"] + list(PRESET_QUESTIONS.keys()))
-
-if selected_preset != "직접 질문":
-    user_query = PRESET_QUESTIONS[selected_preset]
-else:
-    user_query = st.text_input("질문을 입력하세요")
-
-
+# ===========================
+# 4) 분석 실행
+# ===========================
 if user_query:
-
     st.write(f"입력된 질문: **{user_query}**")
 
-    # -------------------------------------------------------
-    # DATE RANGE (fixed)
-    # -------------------------------------------------------
+    # 기간 파싱
     start, end = get_date_range_from_keyword(user_query)
 
-    # -------------------------------------------------------
-    # NURSE NAME 추출
-    # -------------------------------------------------------
+    # 간호사 이름 추출 (기본: 첫 번째 간호사)
     if "nurse_name" in df.columns:
-        nurse_name = df["nurse_name"].iloc[0]
+        nurses = sorted(df["nurse_name"].unique())
+        nurse_name = st.selectbox("간호사 선택", nurses)
     else:
-        nurse_name = "간호사"
+        st.error("데이터에 nurse_name 컬럼이 없습니다.")
+        st.stop()
 
-    # -------------------------------------------------------
-    # FILTER SCHEDULE (fixed)
-    # -------------------------------------------------------
     df_slice = filter_schedule(df, nurse_name, start, end)
 
-    # -------------------------------------------------------
-    # SUMMARY
-    # -------------------------------------------------------
-    result_text = summarize_safety(df_slice, nurse_name, start, end)
-    st.markdown(result_text)
-
-    # -------------------------------------------------------
-    # SAVE LOG
-    # -------------------------------------------------------
-    log_analysis(user_query, result_text)
+    st.markdown(summarize_safety(df_slice, nurse_name, start, end))
