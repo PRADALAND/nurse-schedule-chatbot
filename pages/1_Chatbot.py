@@ -1,128 +1,85 @@
-# pages/Chatbot.py
-
 import streamlit as st
 import pandas as pd
-from utils.free_ai import call_llm
 from utils.features import get_date_range_from_keyword
+from utils.analysis_log import log_analysis
+from utils.free_ai import call_llm
 
 st.title("근무 스케줄 챗봇 (AI 기반)")
 
-df = st.session_state.get("schedule_df")
+# 스케줄 데이터 로드
+df = st.session_state.get("schedule_df", None)
 if df is None:
     st.warning("스케줄 데이터가 없습니다. 메인 페이지에서 파일 업로드하세요.")
     st.stop()
 
-
-# -----------------------------------------------------
-# 통계 계산 함수 (최장연속근무 오류 보정)
-# -----------------------------------------------------
-def compute_stats(df_slice):
-    stats = {}
-
-    # 1) 개인 리스트
-    names = df_slice["nurse_name"].unique()
-
-    for name in names:
-        sub = df_slice[df_slice["nurse_name"] == name].sort_values("date")
-
-        # 전체 근무일수 (OFF 제외)
-        workdays = (sub["shift_type"] != "OFF").sum()
-
-        # 야간 횟수
-        nights = (sub["shift_type"] == "NIGHT").sum()
-
-        # 최장 연속 근무 계산
-        max_streak = 0
-        cur = 0
-        prev_day = None
-
-        for _, row in sub.iterrows():
-            if row["shift_type"] != "OFF":
-                if prev_day is None or (row["date"] - prev_day).days == 1:
-                    cur += 1
-                else:
-                    cur = 1
-                prev_day = row["date"]
-            else:
-                cur = 0
-                prev_day = None
-
-            max_streak = max(max_streak, cur)
-
-        stats[name] = {
-            "workdays": int(workdays),
-            "nights": int(nights),
-            "max_streak": int(max_streak),
-        }
-
-    return stats
-
-
-# -----------------------------------------------------
-# 대화 히스토리 관리
-# -----------------------------------------------------
+# ----------------------------
+# 대화 세션 초기화
+# ----------------------------
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = []   # 완전 비어 있는 상태로 시작
 
 
-# -----------------------------------------------------
+# ----------------------------
 # 사용자 입력
-# -----------------------------------------------------
-query = st.text_input("질문을 입력하세요:", placeholder="예: 이번달 야간 많이 한 사람 누구?")
-
+# ----------------------------
+query = st.text_input(
+    "질문을 입력하세요:",
+    placeholder="예: '홍길동 이번달 야간 몇 번?'"
+)
 
 if st.button("분석 요청"):
     if not query.strip():
         st.warning("질문을 입력하세요.")
         st.stop()
 
-    # 날짜 범위 해석
+    # 날짜 범위 파싱
     start, end = get_date_range_from_keyword(query)
     df_slice = df[(df["date"] >= start) & (df["date"] <= end)]
 
-    # 통계 계산
-    stats = compute_stats(df_slice)
+    # 자동 통계 요약
+    total_work = int((df_slice["shift_type"] != "OFF").sum())
+    night_count = int((df_slice["shift_type"] == "NIGHT").sum())
 
-    # 텍스트 형태로 변환
-    stats_text = "\n".join(
-        f"- {name}: 근무일수 {v['workdays']}일, NIGHT {v['nights']}회, 최장연속근무 {v['max_streak']}일"
-        for name, v in stats.items()
+    auto_stats = (
+        f"선택된 기간: {start} ~ {end}\n"
+        f"전체 근무일수: {total_work}\n"
+        f"야간 근무 횟수: {night_count}\n"
     )
 
-    # ------------------------------
-    # AI 프롬프트
-    # ------------------------------
-    prompt = f"""
-아래는 병동 스케줄 통계이다. 이를 기반으로 질문에 답하라.
+    # ----------------------------
+    # 대화형 LLM 프롬프트 구성
+    # ----------------------------
+    chat_messages = [
+        {"role": "system", "content": (
+            "너는 병동 스케줄 분석을 수행하는 한국어 AI이다. "
+            "항상 한국어로 답변하고, 주어진 통계를 기반으로만 판단한다. "
+            "사용자가 유도하지 않는 이상 과도한 설명, 전문 용어, 반복은 피하라."
+        )}
+    ]
 
-[질문]
-{query}
+    # 기존 대화 이력 추가
+    for turn in st.session_state.chat_history:
+        chat_messages.append(turn)
 
-[분석 기간]
-{start} ~ {end}
+    # 이번 질문 추가
+    chat_messages.append({"role": "user", "content": f"{query}\n\n[자동 통계]\n{auto_stats}"})
 
-[간호사별 통계]
-{stats_text}
+    # LLM 호출
+    response = call_llm(chat_messages)
 
-규칙:
-1) 답변은 자연스러운 한국어로 최종 결과만 말한다.
-2) 절대로 사고 과정, <think>, reasoning을 출력하지 않는다.
-3) 같은 문장을 반복하지 않는다.
-4) 주어진 통계를 기반으로 반드시 결론을 도출한다.
-5) 가능하면 '가장 ~한 사람은 누구인지' 명확히 판단하라.
-"""
+    # 대화 세션에 추가
+    st.session_state.chat_history.append({"role": "user", "content": query})
+    st.session_state.chat_history.append({"role": "assistant", "content": response})
 
-    ai_answer = call_llm(prompt)
-
-    # 기록
-    st.session_state.chat_history.append((query, ai_answer))
+    # 로그 저장
+    log_analysis(query, response)
 
 
-# -----------------------------------------------------
-# 히스토리 출력창 (대화형 UI)
-# -----------------------------------------------------
-st.markdown("### 대화 기록")
-for q, a in st.session_state.chat_history:
-    st.markdown(f"**사용자:** {q}")
-    st.markdown(f"**AI:** {a}")
-    st.markdown("---")
+# ----------------------------
+# 대화 이력 표시
+# ----------------------------
+st.subheader("대화 기록")
+
+for turn in st.session_state.chat_history:
+    role = "사용자" if turn["role"] == "user" else "AI"
+    st.markdown(f"**{role}:** {turn['content']}")
