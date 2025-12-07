@@ -5,69 +5,88 @@ from utils.features import get_date_range_from_keyword
 from utils.analysis_log import log_analysis
 from utils.free_ai import call_llm
 
-# -------------------------------------------------------
-# Page Title
-# -------------------------------------------------------
 st.title("근무 스케줄 챗봇 (AI 기반)")
 
-# -------------------------------------------------------
-# Load schedule from session
-# -------------------------------------------------------
 df = st.session_state.get("schedule_df", None)
 
 if df is None:
     st.warning("스케줄 데이터가 없습니다. 메인 페이지에서 파일 업로드하세요.")
     st.stop()
 
-# -------------------------------------------------------
-# User Input
-# -------------------------------------------------------
 query = st.text_input(
     "질문을 입력하세요:",
-    placeholder="예: '홍길동 이번달 야간 몇 번?' 또는 '이번달 위험도 요약해줘'"
+    placeholder="예: '홍길동 이번달 야간 몇 번?', '이번달 위험도 요약', '누가 제일 힘들었어?'"
 )
 
-# -------------------------------------------------------
-# Run Analysis Button
-# -------------------------------------------------------
 if st.button("분석 요청"):
     if not query.strip():
         st.warning("질문을 입력하세요.")
         st.stop()
 
+    # ------------------------------
     # 날짜 범위 해석
+    # ------------------------------
     start, end = get_date_range_from_keyword(query)
     df_slice = df[(df["date"] >= start) & (df["date"] <= end)]
 
-    # -------------------------------------------------------
-    # Prompt (한국어만, drift 방지)
-    # -------------------------------------------------------
+    if df_slice.empty:
+        st.error("해당 기간에 데이터가 없습니다.")
+        st.stop()
+
+    # ------------------------------
+    # 개인별 통계 계산
+    # ------------------------------
+    def calc_max_streak(shifts):
+        seq = (shifts != "OFF").astype(int)
+        if seq.sum() == 0:
+            return 0
+        return seq.groupby((seq == 0).cumsum()).sum().max()
+
+    stats = df_slice.groupby("nurse_name").agg(
+        work_days=("shift_type", lambda x: (x != "OFF").sum()),
+        night_days=("shift_type", lambda x: (x == "NIGHT").sum()),
+        max_streak=("shift_type", calc_max_streak),
+    ).reset_index()
+
+    stats_text = "\n".join(
+        f"- {row.nurse_name}: 근무일수 {row.work_days}일, NIGHT {row.night_days}회, 최장연속근무 {row.max_streak}일"
+        for _, row in stats.iterrows()
+    )
+
+    # ------------------------------
+    # 범용 LLM 프롬프트
+    # ------------------------------
     prompt = f"""
-    # 절대 규칙(이 규칙은 반드시 지켜야 한다)
-    1) 모든 답변은 100% 한국어로만 작성한다.
-    2) 영어 문장, 영어 용어, 영어 번역투는 절대 사용하지 않는다.
-    3) 자연스럽고 전문적인 간호 스케줄 분석 언어로만 답한다.
-    4) 제공된 스케줄 데이터에 기반하여만 답하고, 없는 정보는 추론하지 않는다.
+너는 한국 병동에서 사용하는 '근무 스케줄 분석 챗봇'이다.
+사용자의 질문을 그대로 이해하고, 아래 데이터만을 근거로 정확한 한국어 답변을 제공하라.
 
-    # 사용자 질문
-    {query}
+[사용자 질문]
+{query}
 
-    # 분석 대상 기간
-    {start} ~ {end}
+[분석 기간]
+{start} ~ {end}
 
-    # 자동 산출된 기초 통계
-    - 전체 근무일수(OFF 제외): {(df_slice['shift_type']!='OFF').sum()}
-    - 야간 근무 횟수: {(df_slice['shift_type']=='NIGHT').sum()}
-    - 분석된 일정 row 수: {len(df_slice)}
+[간호사별 근무 통계]
+{stats_text}
 
-    위 내용을 토대로, 질문 의도에 맞는 간결하고 정확한 한국어 분석 결과를 작성하라.
-    """
+[지시사항]
+1) 질문의 의도를 먼저 파악하라.  
+   - 특정 사람 분석?  
+   - 전체 요약?  
+   - 비교/순위 요청?  
+   - 패턴 설명?  
+   - 위험도 또는 업무강도 해석?  
+   무엇이든 질문에 맞는 형태로 분석하라.
 
-    # 모델 호출
+2) 반드시 위 통계만 사용하고, 없는 데이터(휴게시간/초과근무 등)는 추측하지 마라.
+
+3) 질문이 모호하면 가장 자연스러운 해석을 선택해 설명하라.
+
+4) 답변은 한국어로, 간결하면서도 전문적으로 작성하라.
+
+"""
+
     response = call_llm(prompt)
-
-    # 출력
     st.write(response)
 
-    # 로그 저장
     log_analysis(query, response)
