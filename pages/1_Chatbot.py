@@ -60,4 +60,5 @@ def summarize_safety(df_slice, nurse_name, start, end):
         f"- 평균 위험점수: **{avg_risk:.2f}**, 최고점수: **{max_risk:.0f}** ({level})",
         f"- 최장 연속근무: **{cw_len}일** ({cw_start}~{cw_end})" if cw_len > 1 else "- 연속근무 없음",
         f"- 최장 연속야간: **{cn_len}일** ({cn_start}~{cn_end})" if cn_len > 1 else "- 연속야간 없음",
-        f"- Quick return: ED {n_ed}회, ND_
+        f"- Quick return: ED {n_ed}회, ND {n_nq}회"
+
