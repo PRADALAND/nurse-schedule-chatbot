@@ -3,11 +3,18 @@ import requests
 import os
 import json
 
+# ==============================
+# 환경변수 로드
+# ==============================
 HF_API_TOKEN = os.getenv("HF_API_TOKEN")
-
-# HuggingFace Router 공식 endpoint
 HF_API_URL = "https://router.huggingface.co/v1/chat/completions"
 
+MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
+
+
+# ==============================
+# LLM 호출 함수
+# ==============================
 def call_llm(prompt: str) -> str:
     if not HF_API_TOKEN:
         return "❌ HF_API_TOKEN이 설정되지 않았습니다."
@@ -17,9 +24,8 @@ def call_llm(prompt: str) -> str:
         "Content-Type": "application/json",
     }
 
-    # ChatCompletion 포맷 (HF Router 공식 문법)
     payload = {
-        "model": "mistralai/Mistral-7B-Instruct-v0.2",
+        "model": MODEL_NAME,
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -30,6 +36,7 @@ def call_llm(prompt: str) -> str:
     try:
         resp = requests.post(HF_API_URL, headers=headers, json=payload)
 
+        # 오류 처리
         if resp.status_code != 200:
             return f"❌ LLM API 오류 (status {resp.status_code}): {resp.text}"
 
@@ -39,6 +46,10 @@ def call_llm(prompt: str) -> str:
     except Exception as e:
         return f"❌ 호출 오류: {e}"
 
+
+# ==============================
+# Streamlit UI
+# ==============================
 def main():
     st.title("근무 스케줄 챗봇 (AI 기반)")
 
@@ -50,6 +61,7 @@ def main():
 
         st.subheader("AI 응답")
         st.markdown(answer)
+
 
 if __name__ == "__main__":
     main()
