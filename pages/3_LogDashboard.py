@@ -10,4 +10,4 @@ if not logs:
     st.stop()
 
 df = pd.DataFrame(logs)
-st.dataframe(df)
+st.dataframe(df, height=600)
