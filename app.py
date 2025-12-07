@@ -11,14 +11,6 @@ st.set_page_config(
     layout="wide",
 )
 
-import streamlit as st
-
-def load_secrets():
-    st.session_state["HF_API_TOKEN"] = st.secrets.get("HF_API_TOKEN")
-    st.session_state["HF_API_URL"] = st.secrets.get("HF_API_URL")
-    st.session_state["HF_MODEL"] = st.secrets.get("HF_MODEL")
-
-load_secrets()
 
 
 # ======================================
