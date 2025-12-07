@@ -1,6 +1,50 @@
 import streamlit as st
 from utils.free_ai import call_llm
 
+bubble_css = """
+<style>
+
+.chat-container {
+    margin-top: 10px;
+}
+
+/* 사용자 메시지 */
+.user-bubble {
+    background-color: #dce9f7;   /* 연한 하늘색 */
+    color: #000000 !important;   /* 글자 검정 */
+    padding: 12px 14px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    font-size: 16px;
+    line-height: 1.5;
+    border: 1px solid #b9d3ea;
+}
+
+/* AI 메시지 */
+.ai-bubble {
+    background-color: #fff5cc;   /* 연한 크림색 */
+    color: #000000 !important;   /* 글자 검정 */
+    padding: 12px 14px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    font-size: 16px;
+    line-height: 1.5;
+    border: 1px solid #e6dca8;
+}
+
+/* 역할 표시 텍스트(사용자:, AI:) */
+.role-label {
+    font-weight: 600;
+    color: #333333 !important;
+    margin-bottom: 4px;
+    display: block;
+}
+
+</style>
+"""
+st.markdown(bubble_css, unsafe_allow_html=True)
+
+
 st.set_page_config(page_title="근무 스케줄 챗봇", layout="wide")
 
 # ==============================
