@@ -10,30 +10,37 @@ st.write("간호사 근무표와 근무 스케줄에 대해 질문하면, 근무
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# UI 스타일 (말풍선)
+# 말풍선 스타일 + 글씨 검정 처리
 CHAT_CSS = """
 <style>
 .user-bubble {
-    background-color: #dce8f8;
+    background-color: #dce8f8;  /* 연한 하늘색 */
+    color: #000000 !important;  /* 글씨 검정 */
     padding: 12px;
     border-radius: 10px;
     margin-bottom: 8px;
     width: fit-content;
     max-width: 70%;
+    word-break: break-word;
 }
+
 .ai-bubble {
-    background-color: #f7efc7;
+    background-color: #f7efc7;  /* 연한 노랑 */
+    color: #000000 !important;  /* 글씨 검정 */
     padding: 12px;
     border-radius: 10px;
     margin-bottom: 8px;
     width: fit-content;
     max-width: 70%;
+    word-break: break-word;
 }
+
+/* 기본 텍스트는 streamlit 기본 색상 유지 */
 </style>
 """
 st.markdown(CHAT_CSS, unsafe_allow_html=True)
 
-# 입력받기
+# 입력창
 query = st.text_input("질문을 입력하세요:")
 
 if st.button("질문 보내기") and query.strip():
@@ -42,12 +49,17 @@ if st.button("질문 보내기") and query.strip():
     ai_response = call_llm(query)
     st.session_state.chat_history.append({"role": "ai", "content": ai_response})
 
-
 st.subheader("대화 기록")
 
-# 기록 출력
+# 대화 출력
 for turn in st.session_state.chat_history:
     if turn["role"] == "user":
-        st.markdown(f"<div class='user-bubble'><b>사용자:</b><br>{turn['content']}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='user-bubble'><b>사용자:</b><br>{turn['content']}</div>",
+            unsafe_allow_html=True
+        )
     else:
-        st.markdown(f"<div class='ai-bubble'><b>AI:</b><br>{turn['content']}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='ai-bubble'><b>AI:</b><br>{turn['content']}</div>",
+            unsafe_allow_html=True
+        )
