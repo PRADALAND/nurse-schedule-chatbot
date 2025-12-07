@@ -1,73 +1,53 @@
-import os
-import requests
+import streamlit as st
+from utils.free_ai import call_llm
 
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")
-HF_API_URL = os.getenv("HF_API_URL", "https://router.huggingface.co/v1/responses")
-HF_MODEL = os.getenv("HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B")
+st.set_page_config(page_title="근무 스케줄 챗봇", layout="wide")
 
-SYSTEM_PROMPT = """
-당신은 한국 병원 간호사의 근무표 패턴을 분석하는 전문 AI입니다.
+st.title("근무 스케줄 챗봇 (AI 기반)")
+st.write("간호사 근무표와 근무 스케줄에 대해 질문하면, 근무 패턴 기반으로 분석을 도와드립니다.")
 
-[절대 금지]
-1) 개인의 성향, 능력, 평판, 인성, 업무 태도에 대한 평가
-2) 특정 개인의 위험도 점수·위험 추정
-3) 사실이 아닌 추론, 상상, 근거 없는 예측
-4) 한자, 일본어, 중국어 사용
+# 세션 상태 초기화
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-[허용되는 분석]
-- 근무표 패턴 자체가 만들어내는 피로 누적 가능성
-- 야간근무 과다 여부
-- 휴식 간격의 적정성
-- 스케줄 구조적 위험 요인
-- 데이터 기반 설명
-
-[원칙]
-- 근무표 “패턴 자체”만 분석하고, “개인 평가”는 하지 말 것
-- 데이터가 없으면 “확인할 수 없음”이라고 답변
-- 모든 출력은 반드시 자연스러운 한국어로 작성
+# UI 스타일 (말풍선)
+CHAT_CSS = """
+<style>
+.user-bubble {
+    background-color: #dce8f8;
+    padding: 12px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    width: fit-content;
+    max-width: 70%;
+}
+.ai-bubble {
+    background-color: #f7efc7;
+    padding: 12px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    width: fit-content;
+    max-width: 70%;
+}
+</style>
 """
+st.markdown(CHAT_CSS, unsafe_allow_html=True)
+
+# 입력받기
+query = st.text_input("질문을 입력하세요:")
+
+if st.button("질문 보내기") and query.strip():
+    st.session_state.chat_history.append({"role": "user", "content": query})
+
+    ai_response = call_llm(query)
+    st.session_state.chat_history.append({"role": "ai", "content": ai_response})
 
 
-def call_llm(user_input):
-    """
-    HuggingFace Router Responses API 호출.
-    DeepSeek이 안전필터로 output_text를 비우는 경우가 있어
-    fallback을 반드시 적용해야 한다.
-    """
+st.subheader("대화 기록")
 
-    headers = {
-        "Authorization": f"Bearer {HF_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": HF_MODEL,
-        "input": [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": user_input
-            }
-        ],
-        "max_tokens": 600,
-        "temperature": 0.3
-    }
-
-    try:
-        response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=40)
-        data = response.json()
-
-        # HF Router 표준 응답
-        text = data.get("output_text", "")
-
-        # DeepSeek 안전필터 상황 처리
-        if not text or text.strip() == "":
-            return "요청하신 질문은 개인 위험 평가로 분류되어 모델이 답변을 제한했습니다. 근무표 '패턴 자체'에 대한 질문으로 다시 시도해주세요."
-
-        return text
-
-    except Exception as e:
-        return f"모델 요청 중 오류가 발생했습니다: {str(e)}"
+# 기록 출력
+for turn in st.session_state.chat_history:
+    if turn["role"] == "user":
+        st.markdown(f"<div class='user-bubble'><b>사용자:</b><br>{turn['content']}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='ai-bubble'><b>AI:</b><br>{turn['content']}</div>", unsafe_allow_html=True)
