@@ -1,65 +1,63 @@
 import streamlit as st
-from utils.free_ai import call_llm
+from free_ai import ask_hf
+
+# ============================================================
+# UI 스타일 (가독성 + 색상 문제 해결)
+# ============================================================
+
+USER_BG = "#dce9f7"     # 연한 하늘색
+AI_BG   = "#f7f0c8"     # 연한 크림색
+TEXT_COLOR = "#111111"  # 모든 텍스트 짙은 색으로 고정
 
 st.set_page_config(page_title="근무 스케줄 챗봇", layout="wide")
 
+# CSS
+st.markdown(
+    f"""
+    <style>
+        body, .stTextInput, .stButton, .stMarkdown {{
+            color: {TEXT_COLOR} !important;
+        }}
+        .user-msg {{
+            background-color: {USER_BG};
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }}
+        .ai-msg {{
+            background-color: {AI_BG};
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 16px;
+        }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ============================================================
+# Streamlit 앱
+# ============================================================
+
 st.title("근무 스케줄 챗봇 (AI 기반)")
-st.write("간호사 근무표와 근무 스케줄에 대해 질문하면, 근무 패턴 기반으로 분석을 도와드립니다.")
+st.write("간호사 근무표와 스케줄 관련 질문을 입력하면, 근거 기반 분석을 제공합니다.")
 
-# 세션 상태 초기화
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+# 대화 기록 저장
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# 말풍선 스타일 + 글씨 검정 처리
-CHAT_CSS = """
-<style>
-.user-bubble {
-    background-color: #dce8f8;  /* 연한 하늘색 */
-    color: #000000 !important;  /* 글씨 검정 */
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 8px;
-    width: fit-content;
-    max-width: 70%;
-    word-break: break-word;
-}
+question = st.text_input("질문을 입력하세요:")
 
-.ai-bubble {
-    background-color: #f7efc7;  /* 연한 노랑 */
-    color: #000000 !important;  /* 글씨 검정 */
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 8px;
-    width: fit-content;
-    max-width: 70%;
-    word-break: break-word;
-}
+if st.button("질문 보내기") and question:
+    st.session_state.messages.append(("user", question))
 
-/* 기본 텍스트는 streamlit 기본 색상 유지 */
-</style>
-"""
-st.markdown(CHAT_CSS, unsafe_allow_html=True)
+    answer = ask_hf(question)
+    st.session_state.messages.append(("ai", answer))
 
-# 입력창
-query = st.text_input("질문을 입력하세요:")
-
-if st.button("질문 보내기") and query.strip():
-    st.session_state.chat_history.append({"role": "user", "content": query})
-
-    ai_response = call_llm(query)
-    st.session_state.chat_history.append({"role": "ai", "content": ai_response})
-
+# 대화 히스토리 렌더링
 st.subheader("대화 기록")
-
-# 대화 출력
-for turn in st.session_state.chat_history:
-    if turn["role"] == "user":
-        st.markdown(
-            f"<div class='user-bubble'><b>사용자:</b><br>{turn['content']}</div>",
-            unsafe_allow_html=True
-        )
+for role, msg in st.session_state.messages:
+    if role == "user":
+        st.markdown(f"<div class='user-msg'><b>사용자:</b><br>{msg}</div>", unsafe_allow_html=True)
     else:
-        st.markdown(
-            f"<div class='ai-bubble'><b>AI:</b><br>{turn['content']}</div>",
-            unsafe_allow_html=True
-        )
+        st.markdown(f"<div class='ai-msg'><b>AI:</b><br>{msg}</div>", unsafe_allow_html=True)
