@@ -2,9 +2,8 @@ import os
 import requests
 
 HF_TOKEN = os.getenv("HF_API_TOKEN")
-HF_MODEL = os.getenv("HF_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
+HF_MODEL = os.getenv("HF_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 
-# HuggingFace Router Chat Completion Endpoint
 HF_URL = "https://router.huggingface.co/v1/chat/completions"
 
 
@@ -22,7 +21,7 @@ def call_llm(user_input: str) -> str:
         "messages": [
             {"role": "user", "content": user_input}
         ],
-        "max_tokens": 256,
+        "max_tokens": 300,
         "temperature": 0.2
     }
 
