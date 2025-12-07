@@ -12,30 +12,38 @@ st.set_page_config(
 )
 
 
+# ======================================
+# 세션 상태 초기화
+# ======================================
 def init_state():
-    if "schedule_df" not in st.session_state:
-        st.session_state["schedule_df"] = None
-    if "fairness_summary" not in st.session_state:
-        st.session_state["fairness_summary"] = None
-    if "fairness_stats" not in st.session_state:
-        st.session_state["fairness_stats"] = None
+    st.session_state.setdefault("schedule_df", None)
+    st.session_state.setdefault("fairness_summary", None)
+    st.session_state.setdefault("fairness_stats", None)
+    st.session_state.setdefault("nurse_list", [])
 
 
+# ======================================
+# 메인 로직
+# ======================================
 def main():
     init_state()
 
     st.title("간호사 스케줄 인텔리전스 (Nurse Schedule Intelligence)")
+
     st.markdown(
-    """
-    이 앱은 근무표(스케줄 파일)를 업로드하면,
+        """
+        이 앱은 근무표(스케줄 파일)를 업로드하면,
 
-    - 야간/연속근무, quick return 등 **기본 근무 특성**을 자동으로 계산하고  
-    - **환자안전에 영향을 미치는 인력수준과 근무 패턴의 위험도**를 산출하며  
-    - **간호사 간 근무 공정성**을 분석하여  
-    **대시보드 · 챗봇 · 월별/일별 리포트**로 보여줍니다.
-    """
-)
+        - 야간/연속근무, quick return 등 **기본 근무 특성**을 자동으로 계산하고  
+        - **환자안전에 영향을 미치는 인력수준과 근무 패턴의 위험도**를 산출하며  
+        - **간호사 간 근무 공정성**을 분석하여  
+        **대시보드 · 챗봇 · 월별/일별 리포트**로 보여줍니다.
+        """
+    )
 
+    # --------------------------------------
+    # 사이드바 파일 업로드
+    # --------------------------------------
     with st.sidebar:
         st.header("1. 스케줄 파일 업로드")
         uploaded = st.file_uploader(
@@ -49,35 +57,44 @@ def main():
                 base = add_base_features(raw)
                 full = add_risk_scores(base)
 
+                # 저장
                 st.session_state["schedule_df"] = full
+                st.session_state["nurse_list"] = sorted(full["nurse_name"].dropna().unique().tolist())
 
-                st.success(f"스케줄 로딩 및 피처 생성 완료 (총 {len(full)}행).")
-
-                nurse_list = sorted(full["nurse_name"].dropna().unique().tolist())
-                st.session_state["nurse_list"] = nurse_list
-
+                # 공정성 계산
                 summary = compute_fairness_table(full)
                 stats = compute_fairness_stats(summary)
                 st.session_state["fairness_summary"] = summary
                 st.session_state["fairness_stats"] = stats
 
+                st.success(f"스케줄 로딩 및 피처 생성 완료 (총 {len(full)}행).")
+
             except Exception as e:
                 st.error(f"파일 처리 중 오류가 발생했습니다: {e}")
 
+    # --------------------------------------
+    # 업로드 안 했을 때 메시지
+    # --------------------------------------
     df = st.session_state.get("schedule_df")
 
     if df is None:
         st.info("좌측에서 스케줄 파일을 업로드하면 전체 기능이 활성화됩니다.")
         return
 
+    # --------------------------------------
+    # 업로드된 표 출력
+    # --------------------------------------
     st.subheader("업로드된 스케줄 및 피처 (상위 50행 미리보기)")
     st.dataframe(df.head(50))
 
+    # --------------------------------------
+    # 공정성 요약 출력
+    # --------------------------------------
     st.subheader("간단 공정성 요약")
-    fairness_summary = st.session_state.get("fairness_summary")
-    fairness_stats = st.session_state.get("fairness_stats")
+    fairness_summary = st.session_state["fairness_summary"]
+    fairness_stats = st.session_state["fairness_stats"]
 
-    if fairness_summary is not None and not fairness_summary.empty:
+    if fairness_summary is not None and len(fairness_summary) > 0:
         col1, col2 = st.columns(2)
 
         with col1:
@@ -85,22 +102,15 @@ def main():
             st.dataframe(fairness_summary)
 
         with col2:
-            st.markdown("**병동 전체 공정성 지표 (예시)**")
-            if fairness_stats:
-                st.write(
-                    {
-                        "야간 근무 횟수 표준편차": fairness_stats.get("night_std", None),
-                        "주말 근무 횟수 표준편차": fairness_stats.get("weekend_std", None),
-                        "야간 비율 표준편차": fairness_stats.get("night_ratio_std", None),
-                        "주말 비율 표준편차": fairness_stats.get("weekend_ratio_std", None),
-                        "평균 overall risk": fairness_stats.get("avg_mean_overall_risk", None),
-                    }
-                )
-            else:
-                st.write("계산 가능한 공정성 통계가 없습니다.")
+            st.markdown("**병동 전체 공정성 지표**")
+            st.write(fairness_stats)
+
     else:
         st.info("공정성 요약을 계산할 수 있는 데이터가 부족합니다.")
 
 
+# ======================================
+# 진입점
+# ======================================
 if __name__ == "__main__":
     main()
