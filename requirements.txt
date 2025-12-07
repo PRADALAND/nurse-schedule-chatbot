@@ -1,6 +1,6 @@
-streamlit
+huggingface_hub
 pandas
-supabase
-openai
-requests
 Pillow
+requests
+streamlit
+supabase
