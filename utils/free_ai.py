@@ -3,47 +3,38 @@
 import os
 import requests
 
-
-# -----------------------------------------------------
-# 1) 환경변수 로딩
-# -----------------------------------------------------
+# ======================================================
+# 환경변수 로딩
+# ======================================================
 
 HF_TOKEN = os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN")
 HF_URL = os.getenv("HF_API_URL", "https://router.huggingface.co/v1/responses")
 HF_MODEL = os.getenv("HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B")
 
 
-# -----------------------------------------------------
-# 2) 오류 유형 정의
-# -----------------------------------------------------
-
 class HFConfigError(RuntimeError):
-    """환경변수 오류."""
     pass
 
 
-# -----------------------------------------------------
-# 3) 환경변수 유효성 검사
-# -----------------------------------------------------
-
 def _ensure_config():
+    """필수 환경변수 확인"""
     if not HF_TOKEN:
-        raise HFConfigError("HF_API_TOKEN 또는 HF_TOKEN 환경변수가 없습니다.")
+        raise HFConfigError("HF_API_TOKEN / HF_TOKEN 환경변수가 없습니다.")
     if not HF_URL.startswith("http"):
-        raise HFConfigError(f"HF_API_URL이 잘못되었습니다: {HF_URL!r}")
+        raise HFConfigError(f"HF_API_URL 형식 오류: {HF_URL}")
     if not HF_MODEL:
         raise HFConfigError("HF_MODEL 환경변수가 비어 있습니다.")
 
 
-# -----------------------------------------------------
-# 4) LLM 호출 함수
-# -----------------------------------------------------
-
+# ======================================================
+# LLM 호출 함수
+# ======================================================
 def call_llm(user_prompt: str) -> str:
     """
-    병동 스케줄 챗봇에서 사용하는 LLM 호출 함수.
-    입력: user_prompt (string)
-    출력: string (한국어 모델 응답)
+    병동 스케줄 분석용 LLM 호출 함수.
+    - 반드시 한국어만 출력
+    - chain-of-thought 절대 노출 금지
+    - 데이터 부족해도 가능한 범위 최대 분석 수행
     """
 
     _ensure_config()
@@ -51,66 +42,72 @@ def call_llm(user_prompt: str) -> str:
     if not user_prompt or not user_prompt.strip():
         return "입력된 질문이 없습니다."
 
-    # -----------------------------------------------------
-    # 한국어로만 답변하도록 강제하는 System Prompt
-    # DeepSeek-R1 hallucination 및 <think> 방지 설정
-    # -----------------------------------------------------
-    system_prompt = (
-        "너는 병동 근무표 분석을 수행하는 전문 한국어 AI이다.\n"
-        "반드시 지켜야 할 규칙:\n"
-        "1) 모든 답변은 100% 자연스러운 한국어로 작성한다.\n"
-        "2) <think>, 사고 과정, 중간 추론은 절대 출력하지 않는다.\n"
-        "3) 제공된 데이터와 사용자 프롬프트 범위 밖의 내용은 추론하지 않는다.\n"
-        "4) 근거가 없는 추론, 임의 가정, 과장, 추측은 절대 하지 않는다.\n"
-        "5) 데이터가 부족하면 '해당 정보를 판단하기에 데이터가 부족합니다'라고 말한다.\n"
-        "6) 논리적이고 정확하며 간결하게 설명한다.\n"
-        "7) 스케줄 분석 시 '근무일수, 야간횟수, 연속근무, OFF간격' 같은 실제 제공된 통계만 활용한다.\n"
-    )
-
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
     }
 
+    # ================================================
+    # 🔥 최적화된 SYSTEM PROMPT — 절대 고치지 않는 것을 추천
+    # ================================================
+    system_prompt = (
+        "너는 한국 병동의 근무 스케줄을 분석하는 전문 AI이다. "
+        "출력은 반드시 **한국어로만** 작성한다. "
+        "내부 추론 과정, chain-of-thought, 사고 과정은 절대로 노출하지 않는다. "
+        "사용자가 제공한 통계가 불완전하더라도, "
+        "그 정보 안에서 **가능한 모든 상대적 분석·추정**을 제공해야 한다. "
+        "단, 존재하지 않는 근무 데이터를 마음대로 만들면 안 된다. "
+        "답변은 반드시 다음 3단 구조로 작성한다:\n"
+        "1) 가능한 상대적 분석: 제공된 정보 안에서 최대한 의미 있는 해석을 제시\n"
+        "2) 한계: 왜 정확한 판정이 어려운지, 어떤 정보가 부족한지\n"
+        "3) 필요한 데이터: 더 정확한 분석을 위해 필요한 최소 데이터 2~3개\n"
+        "이 세 가지는 항상 포함해야 한다."
+    )
+
+    # ================================================
+    # 모델 입력 payload
+    # ================================================
     payload = {
         "model": HF_MODEL,
         "input": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.3,
-        "max_output_tokens": 512,
+        "max_output_tokens": 600,
+        "temperature": 0.25,   # 안정적 분석을 위해 낮게 유지
     }
 
+    # ================================================
+    # API 요청
+    # ================================================
     try:
         response = requests.post(HF_URL, headers=headers, json=payload, timeout=40)
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"HF API 네트워크 오류: {e}")
+        raise RuntimeError(f"HF API 네트워크 오류: {e}") from e
 
     if response.status_code != 200:
-        raise RuntimeError(f"HF API Error {response.status_code}: {response.text}")
+        raise RuntimeError(
+            f"HF API Error {response.status_code}: {response.text}"
+        )
 
     data = response.json()
 
-    # -----------------------------------------------------
-    # Responses API 파싱
-    # -----------------------------------------------------
+    # ================================================
+    # HuggingFace Responses API 파싱
+    # ================================================
     try:
         outputs = data.get("output", [])
         if outputs:
-            contents = outputs[0].get("content", [])
-            for item in contents:
-                if item.get("type") in ("output_text", "text"):
-                    txt = item.get("text", "").strip()
-                    if txt:
-                        # 혹시 <think>가 들어와도 제거
-                        return txt.replace("<think>", "").replace("</think>", "").strip()
+            content_blocks = outputs[0].get("content", [])
+            for c in content_blocks:
+                if c.get("type") in ("output_text", "text"):
+                    text = c.get("text", "").strip()
+                    if text:
+                        return text
 
-        # Fallback
-        if "output_text" in data:
-            txt = data["output_text"]
-            if isinstance(txt, str):
-                return txt.strip()
+        # fallback
+        if isinstance(data.get("output_text"), str):
+            return data["output_text"].strip()
 
     except Exception:
         return str(data)
