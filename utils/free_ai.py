@@ -24,17 +24,15 @@ SYSTEM_PROMPT = """
 [원칙]
 - 근무표 “패턴 자체”만 분석하고, “개인 평가”는 하지 말 것
 - 데이터가 없으면 “확인할 수 없음”이라고 답변
-- 모든 출력은 반드시 자연스러운 한국어로 작성
+- 모든 출력은 자연스러운 한국어로 작성
 """
 
 
 def call_llm(user_input):
     """
-    HuggingFace Router Responses API 호출.
-    DeepSeek이 안전필터로 output_text를 비우는 경우가 있어
-    fallback을 반드시 적용해야 한다.
+    HuggingFace Router Responses API 호출 함수.
+    DeepSeek의 안전필터로 output_text가 비어 있는 경우가 있어 fallback 적용.
     """
-
     headers = {
         "Authorization": f"Bearer {HF_API_TOKEN}",
         "Content-Type": "application/json"
@@ -43,29 +41,25 @@ def call_llm(user_input):
     payload = {
         "model": HF_MODEL,
         "input": [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": user_input
-            }
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_input}
         ],
         "max_tokens": 600,
-        "temperature": 0.3
+        "temperature": 0.4
     }
 
     try:
         response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=40)
         data = response.json()
 
-        # HF Router 표준 응답
         text = data.get("output_text", "")
 
-        # DeepSeek 안전필터 상황 처리
+        # 안전필터 fallback
         if not text or text.strip() == "":
-            return "요청하신 질문은 개인 위험 평가로 분류되어 모델이 답변을 제한했습니다. 근무표 '패턴 자체'에 대한 질문으로 다시 시도해주세요."
+            return (
+                "요청하신 질문은 개인 위험 평가로 분류되어 답변이 제한되었습니다.\n"
+                "근무 스케줄 '패턴 자체'에 대한 질문으로 다시 시도해주세요."
+            )
 
         return text
 
