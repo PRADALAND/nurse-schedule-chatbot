@@ -1,20 +1,14 @@
-# utils/analysis_log.py
-from utils.supabase_client import get_supabase_client
+import datetime
+import streamlit as st
 
-TABLE = "analysis_logs"
+def log_analysis(user_query, response):
+    """사용자 질의와 chatbot 응답을 session_state에 기록"""
 
-def log_analysis(user_id, file_name, file_type, file_url, user_prompt, ai_summary):
-    sb = get_supabase_client()
-    sb.table(TABLE).insert({
-        "user_id": user_id,
-        "file_name": file_name,
-        "file_type": file_type,
-        "file_url": file_url,
-        "user_prompt": user_prompt,
-        "ai_summary": ai_summary,
-    }).execute()
+    if "analysis_logs" not in st.session_state:
+        st.session_state["analysis_logs"] = []
 
-def fetch_logs(limit=200):
-    sb = get_supabase_client()
-    res = sb.table(TABLE).select("*").order("created_at", desc=True).limit(limit).execute()
-    return res.data
+    st.session_state["analysis_logs"].append({
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "query": user_query,
+        "response": response,
+    })
