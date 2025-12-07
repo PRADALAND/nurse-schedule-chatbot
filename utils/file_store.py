@@ -1,17 +1,28 @@
+# utils/file_store.py
 import time
-from .supabase_client import get_supabase
+from utils.supabase_client import get_supabase_client
 
 BUCKET = "chatbot-files"
 
+def _safe_filename(user_id: str, original: str) -> str:
+    ts = int(time.time())
+    return f"{user_id}/{ts}_{original}"
+
 def upload_file(user_id: str, file_obj):
-    sb = get_supabase()
-    filename = f"{user_id}/{int(time.time())}_{file_obj.name}"
-    content = file_obj.read()
+    """
+    Streamlit UploadedFile → Supabase Storage 업로드 후
+    (path, public_url) 반환.
+    """
+    sb = get_supabase_client()
 
-    sb.storage.from_(BUCKET).upload(filename, content, {
-        "content-type": file_obj.type
-    })
+    file_bytes = file_obj.read()
+    path = _safe_filename(user_id, file_obj.name)
 
-    url = sb.storage.from_(BUCKET).get_public_url(filename)
-    return filename, url
+    sb.storage.from_(BUCKET).upload(
+        path,
+        file_bytes,
+        {"content-type": file_obj.type},
+    )
 
+    public_url = sb.storage.from_(BUCKET).get_public_url(path)
+    return path, public_url
