@@ -13,17 +13,18 @@ def call_llm(query):
         "Content-Type": "application/json"
     }
 
-    # reasoning 억제 + 한국어 강제
     prompt = (
-        "아래 질문에 대해 즉시 한국어로 간결하게 답변하라. "
-        "추론 과정(CoT)은 출력하지 않는다. "
+        f"아래 질문에 대해 한국어로 간결하게 답하라.\n"
         f"질문: {query}"
     )
 
     payload = {
         "model": HF_MODEL,
-        "input": prompt,
-        "max_tokens": 300
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 300,
+            "temperature": 0.7
+        }
     }
 
     try:
@@ -34,18 +35,14 @@ def call_llm(query):
 
         data = res.json()
 
-        if "error" in data and data["error"]:
-            return f"[HF Router Error] {data['error']}"
+        # 무료 inference의 정규 출력 구조
+        if "generated_text" in data:
+            return data["generated_text"].strip()
 
-        # 정상 출력 파싱
-        content_blocks = data["output"][0]["content"]
-        answer = ""
+        if isinstance(data, list) and "generated_text" in data[0]:
+            return data[0]["generated_text"].strip()
 
-        for block in content_blocks:
-            if block["type"] == "output_text":
-                answer += block["text"]
-
-        return answer.strip()
+        return f"[파싱 오류] 원본 응답: {data}"
 
     except Exception as e:
         return f"[예외 발생] {e}"
