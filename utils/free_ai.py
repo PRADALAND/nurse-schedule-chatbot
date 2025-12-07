@@ -3,13 +3,12 @@ import requests
 
 HF_TOKEN = os.getenv("HF_API_TOKEN")
 HF_MODEL = os.getenv("HF_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
-
 HF_URL = "https://router.huggingface.co/v1/chat/completions"
 
 
-def call_llm(user_input: str) -> str:
+def call_llm(prompt: str) -> str:
     if not HF_TOKEN:
-        raise RuntimeError("ERROR: HF_API_TOKEN not set in environment.")
+        raise RuntimeError("HF_API_TOKEN is missing in environment variables.")
 
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
@@ -19,10 +18,10 @@ def call_llm(user_input: str) -> str:
     payload = {
         "model": HF_MODEL,
         "messages": [
-            {"role": "user", "content": user_input}
+            {"role": "user", "content": prompt}
         ],
-        "max_tokens": 300,
-        "temperature": 0.2
+        "max_tokens": 200,
+        "temperature": 0.3
     }
 
     response = requests.post(HF_URL, headers=headers, json=payload)
